@@ -6,7 +6,7 @@ module tb_packet_translator;
     logic isop, ieop, ivalid, ibad;
     logic [INPUT_WIDTH-1:0] idata;
     logic [1:0] iresidual;
-    logic osop, oeop, ovalid, obad, oready;
+    logic osop, oeop, ovalid, obad, oready, ocpu_interrupt;
     logic [OUTPUT_WIDTH-1:0] odata;
     logic [13:0] oplen;
     
@@ -31,7 +31,8 @@ module tb_packet_translator;
         .oplen(oplen),
         .odata(odata),
         .obad(obad),
-        .oready(oready)
+        .oready(oready),
+        .ocpu_interrupt (ocpu_interrupt)
     );
 
     initial begin 
