@@ -34,6 +34,7 @@ typedef struct packed {
 } fifo_data_t;
 
 typedef struct packed {
+  logic [19:0] reserved;
   logic [13:0] oplen;
   logic bad;
 } fifo_meta_t;
@@ -41,6 +42,7 @@ typedef struct packed {
 logic [13:0] pkt_byte_cntr, pkt_byte_cntr_q;
 logic [13:0] init_val;
 logic [2:0]  increment_val;
+logic fifo_meta_wr_en, fifo_meta_wr_en_q;
 
 // Initial is driven based off of ivalid & isop
 // Addition is driven based off of ivalid & ieop
@@ -50,8 +52,11 @@ assign increment_val = (ivalid & ieop) ? (~&iresidual ? 3'd4 : iresidual) : (iva
 always_ff @(posedge iclk, posedge irst) begin : proc_pkt_byte_cntr
     if(irst) begin
         pkt_byte_cntr <= '0;
+        fifo_meta_wr_en <= 1'b0;
     end else begin
         pkt_byte_cntr <= init_val + increment_val;
+        fifo_meta_wr_en <= ivalid & ieop;
+        fifo_meta_wr_en_q <= fifo_meta_wr_en;
     end
 end
 
@@ -85,16 +90,15 @@ async_fifo
 #(.DSIZE($bits(fifo_data_t)))
 fifo_phase0
     (
-        .wclk (iclk),
-        .wrst_n (~irst),
-        .winc(fifo_phase0_wren),
-        .wdata(fifo_phase_data), // Same write data to both FIFOs
-        .wfull(fifo_phase0_full), // TODO Connect full to detect errors on incoming signal since we cannot backpressure input
-        .rclk(oclk),
-        .rrst_n (~orst),
-        .rinc(fifo_phase0_rden),
-        .rdata(fifo_phase0_rdata),
-        .rempty(fifo_phase0_rempty)
+        .wr_clk (iclk),
+        .rst (irst),
+        .wr_en(fifo_phase0_wren),
+        .din(fifo_phase_data), // Same write data to both FIFOs
+        .full(fifo_phase0_full), // TODO Connect full to detect errors on incoming signal since we cannot backpressure input
+        .rd_clk(oclk),
+        .rd_en(fifo_phase0_rden),
+        .dout(fifo_phase0_rdata),
+        .empty(fifo_phase0_rempty)
     );
 
 logic fifo_phase1_wren;
@@ -109,16 +113,15 @@ async_fifo
 #(.DSIZE($bits(fifo_data_t)))
 fifo_phase1
     (
-        .wclk (iclk),
-        .wrst_n (~irst),
-        .winc(fifo_phase1_wren),
-        .wdata(fifo_phase_data), // Same write data to both FIFOs
-        .wfull(fifo_phase1_full), // TODO Connect full to detect errors on incoming signal since we cannot backpressure input
-        .rclk(oclk),
-        .rrst_n (~orst),
-        .rinc(fifo_phase1_rden),
-        .rdata(fifo_phase1_rdata),
-        .rempty(fifo_phase1_rempty)
+        .wr_clk (iclk),
+        .rst (irst),
+        .wr_en(fifo_phase1_wren),
+        .din(fifo_phase_data), // Same write data to both FIFOs
+        .full(fifo_phase1_full), // TODO Connect full to detect errors on incoming signal since we cannot backpressure input
+        .rd_clk(oclk),
+        .rd_en(fifo_phase1_rden),
+        .dout(fifo_phase1_rdata),
+        .empty(fifo_phase1_rempty)
     );
 
 fifo_meta_t fifo_meta_wr_data;
@@ -127,23 +130,23 @@ logic fifo_meta_full;
 fifo_data_t fifo_meta_rdata;
 logic fifo_meta_rden, fifo_meta_rden_q;
 logic fifo_meta_rempty;
-assign fifo_meta_wr_data.bad = ieop ? ibad : 1'b0;
-assign fifo_meta_wr_data.oplen = ieop ? pkt_byte_cntr : '0;
+assign fifo_meta_wr_data.bad = fifo_meta_wr_en_q ? ibad : 1'b0; // TODO Should not be with _q, but vivado simulator is buggy
+assign fifo_meta_wr_data.oplen = fifo_meta_wr_en_q ? pkt_byte_cntr : '0; // TODO Should not be with _q, but vivado simulator is buggy
+assign fifo_meta_wr_data.reserved = '0;
 
 async_fifo 
 #(.DSIZE($bits(fifo_data_t)))
 fifo_meta
     (
-        .wclk (iclk),
-        .wrst_n (~irst),
-        .winc(ieop), // TODO WREN should be driven based off of ieop since wdata is clocked
-        .wdata(fifo_meta_wr_data), // Same write data to both FIFOs
-        .wfull(fifo_meta_full), // TODO Connect full to detect errors on incoming signal since we cannot backpressure input
-        .rclk(oclk),
-        .rrst_n (~orst),
-        .rinc(fifo_meta_rden),
-        .rdata(fifo_meta_rd_data),
-        .rempty(fifo_meta_rempty)
+        .wr_clk (iclk),
+        .rst (irst),
+        .wr_en(fifo_meta_wr_en_q), // TODO WREN should be driven based off of ieop since wdata is clocked
+        .din(fifo_meta_wr_data), // Same write data to both FIFOs
+        .full(fifo_meta_full), // TODO Connect full to detect errors on incoming signal since we cannot backpressure input
+        .rd_clk(oclk),
+        .rd_en(fifo_meta_rden),
+        .dout(fifo_meta_rd_data),
+        .empty(fifo_meta_rempty)
     );
 
 typedef enum {IDLE, DATA} state_t;
@@ -208,8 +211,8 @@ always_ff @( posedge oclk, posedge orst ) begin
 end
 
 assign ovalid = fifo_phase_rd_valid;
-assign osop = fifo_phase0_rdata.sop | fifo_phase1_rdata.sop;
-assign oeop = fifo_phase0_rdata.eop | fifo_phase1_rdata.eop;
+assign osop = (fifo_phase0_rdata.sop | fifo_phase1_rdata.sop) & ovalid;
+assign oeop = (fifo_phase0_rdata.eop | fifo_phase1_rdata.eop) & ovalid;
 assign odata = {fifo_phase0_rdata.data, fifo_phase1_rdata.data};
 assign oplen = fifo_meta_rd_data.oplen;
 assign obad = fifo_meta_rd_data.bad;
