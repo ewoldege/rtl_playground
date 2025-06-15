@@ -22,6 +22,7 @@ module packet_translator
     output logic [OUTPUT_WIDTH-1:0] odata,
     input  logic oready,
     output logic obad,
+    output logic odebug_half_polarity,
 
     output logic ocpu_interrupt // Fatal error
 );
@@ -30,7 +31,14 @@ typedef struct packed {
   logic sop;
   logic eop;
   logic bad;
-  logic [31:0] data;
+  logic [INPUT_WIDTH-1:0] data;
+} input_data_t;
+
+typedef struct packed {
+  logic sop;
+  logic eop;
+  logic bad;
+  logic [OUTPUT_WIDTH-1:0] data;
 } fifo_data_t;
 
 typedef struct packed {
@@ -47,7 +55,7 @@ logic fifo_meta_wr_en, fifo_meta_wr_en_q;
 // Initial is driven based off of ivalid & isop
 // Addition is driven based off of ivalid & ieop
 assign init_val = (ivalid & isop) ? '0 : (ivalid ? pkt_byte_cntr : '0);
-assign increment_val = (ivalid & ieop) ? (~&iresidual ? 3'd4 : iresidual) : (ivalid ? 3'd4 : '0);
+assign increment_val = (ivalid & ieop) ? (~|iresidual ? 3'd4 : {1'b0, iresidual}) : (ivalid ? 3'd4 : '0);
 
 always_ff @(posedge iclk, posedge irst) begin : proc_pkt_byte_cntr
     if(irst) begin
@@ -61,12 +69,19 @@ always_ff @(posedge iclk, posedge irst) begin : proc_pkt_byte_cntr
 end
 
 logic fifo_phase0_wren;
-fifo_data_t fifo_phase_data;
-logic fifo_phase0_full;
-logic fifo_phase0_rden;
-fifo_data_t fifo_phase0_rdata;
-logic fifo_phase0_rempty;
+fifo_data_t fifo_wr_data;
+logic fifo_full;
+logic fifo_rden;
+fifo_data_t fifo_rdata;
+logic fifo_rempty;
 logic phase_wren_toggle, phase_wren_toggle_q;
+input_data_t input_data;
+input_data_t [1:0] shift_data, shift_data_q;
+
+assign input_data.sop = isop;
+assign input_data.eop = ieop;
+assign input_data.data = idata;
+assign input_data.bad = ibad;
 
 // Phase values toggle between 0 and 1. 
 // Start of the packet always starts with toggle value of 0.
@@ -74,31 +89,30 @@ logic phase_wren_toggle, phase_wren_toggle_q;
 // Phase 0 FIFO wren is enabled when toggle == 0.
 // Phase 1 FIFO wren is enabled when toggle == 1.
 assign phase_wren_toggle = (isop & ivalid) ? 1'b0 : (ivalid ? ~phase_wren_toggle_q : phase_wren_toggle_q);
-always_ff @(posedge iclk) phase_wren_toggle_q <= phase_wren_toggle;
+assign shift_data = ivalid ? {shift_data_q[0], input_data} : shift_data_q;
+always_ff @(posedge iclk) begin
+  phase_wren_toggle_q <= phase_wren_toggle;
+  shift_data_q <= shift_data;
+end
 
-assign fifo_phase0_wren = ivalid & ~phase_wren_toggle;
+assign fifo_wren = ivalid & (phase_wren_toggle | ieop);
 // Common FIFO Write Data
-assign fifo_phase_data.sop = isop;
-assign fifo_phase_data.eop = ieop;
-assign fifo_phase_data.data = idata;
-assign fifo_phase_data.bad = ibad;
+assign fifo_wr_data.sop = fifo_wren ? shift_data[0].sop | shift_data[1].sop : 1'b0;
+assign fifo_wr_data.eop = fifo_wren ? shift_data[0].eop | shift_data[1].eop : 1'b0;
+assign fifo_wr_data.data = fifo_wren ? {shift_data[1].data, shift_data[0].data} : '0;
+assign fifo_wr_data.bad = fifo_wren ? (shift_data[0].bad | shift_data[1].bad) : 1'b0; // TODO May need to qualify this with eop and valid
 
-// // Common FIFO RD Enable
-// assign fifo_phase_rden = oready & ~fifo_phase0_rempty & ~fifo_phase1_rempty & pf_ready;
-
-async_fifo 
-#(.DSIZE($bits(fifo_data_t)))
-fifo_phase0
+async_fifo fifo_data
     (
         .wr_clk (iclk),
         .rst (irst),
-        .wr_en(fifo_phase0_wren),
-        .din(fifo_phase_data), // Same write data to both FIFOs
-        .full(fifo_phase0_full), // TODO Connect full to detect errors on incoming signal since we cannot backpressure input
+        .wr_en(fifo_wren),
+        .din(fifo_wr_data),
+        .full(fifo_full), // TODO Connect full to detect errors on incoming signal since we cannot backpressure input
         .rd_clk(oclk),
-        .rd_en(fifo_phase0_rden),
-        .dout(fifo_phase0_rdata),
-        .empty(fifo_phase0_rempty)
+        .rd_en(fifo_rden),
+        .dout(fifo_rdata),
+        .empty(fifo_rempty)
     );
 
 logic fifo_phase1_wren;
@@ -108,21 +122,6 @@ fifo_data_t fifo_phase1_rdata;
 logic fifo_phase1_rempty;
 
 assign fifo_phase1_wren = ivalid & phase_wren_toggle;
-
-async_fifo 
-#(.DSIZE($bits(fifo_data_t)))
-fifo_phase1
-    (
-        .wr_clk (iclk),
-        .rst (irst),
-        .wr_en(fifo_phase1_wren),
-        .din(fifo_phase_data), // Same write data to both FIFOs
-        .full(fifo_phase1_full), // TODO Connect full to detect errors on incoming signal since we cannot backpressure input
-        .rd_clk(oclk),
-        .rd_en(fifo_phase1_rden),
-        .dout(fifo_phase1_rdata),
-        .empty(fifo_phase1_rempty)
-    );
 
 fifo_meta_t fifo_meta_wr_data;
 fifo_meta_t fifo_meta_rd_data;
@@ -151,12 +150,15 @@ fifo_meta
 
 typedef enum {IDLE, DATA} state_t;
 state_t curr_state, next_state;
-logic pf_ready;
+logic pf_ready, pf_ready_q;
+logic last_read_for_packet, last_read_for_packet_q;
 
 always_ff @( posedge oclk, posedge orst ) begin
     if (orst) begin
         curr_state <= IDLE;
+        pf_ready_q <= 1'b0;
     end else begin
+        pf_ready_q <= pf_ready;
         curr_state <= next_state;
         fifo_meta_rden_q <= fifo_meta_rden;
     end
@@ -180,10 +182,10 @@ always_comb begin
     end
     DATA: begin
       pf_ready = 1'b1;
-      if (oeop & ~fifo_meta_rempty & oready) begin
+      if (last_read_for_packet & ~fifo_meta_rempty) begin
         fifo_meta_rden = 1'b1;
         next_state = DATA;
-      end else if (oeop) begin
+      end else if (last_read_for_packet) begin
         fifo_meta_rden = 1'b0;
         next_state = IDLE;
       end else begin
@@ -194,27 +196,64 @@ always_comb begin
     endcase 
 end
 
+assign fifo_rden = pf_ready & oready & |pkt_len_remaining_q; // Not checking empty flag of FIFO because logic should handle this. Assertion in place to catch this if it happens
 logic [13:0] pkt_len_remaining, pkt_len_remaining_q;
+logic debug_half_polarity, debug_half_polarity_q;
 
 assign pkt_len_remaining = fifo_meta_rden_q ? fifo_meta_rd_data.oplen : oready ? (((pkt_len_remaining_q <= 8) ? '0 : pkt_len_remaining_q - 8)) : pkt_len_remaining_q;
-assign fifo_phase0_rden = |pkt_len_remaining_q & oready; // If there is any data, read FIFO phase 0
-assign fifo_phase1_rden = pkt_len_remaining_q > 4 & oready; // If there is more than 4 bytes remaining, read FIFO phase 1
+assign last_read_for_packet = (pkt_len_remaining_q <= 8) & fifo_rden;
+assign debug_half_polarity = (pkt_len_remaining_q <= 4) & fifo_rden; // Only for debug purposes
+
 
 logic fifo_phase_rd_valid;
 always_ff @( posedge oclk, posedge orst ) begin
     if (orst) begin
-       pkt_len_remaining_q <= '0; 
+        fifo_phase_rd_valid <= 1'b0;
+        last_read_for_packet_q <= 1'b0;
+        pkt_len_remaining_q <= '0;
     end else begin
-       pkt_len_remaining_q <= pkt_len_remaining;
-       fifo_phase_rd_valid <= fifo_phase0_rden; // FIFO Phase 0 will always be read on any given read cycle.
+        pkt_len_remaining_q <= pkt_len_remaining;
+        fifo_phase_rd_valid <= fifo_rden;
+        last_read_for_packet_q <= last_read_for_packet;
+        debug_half_polarity_q <= debug_half_polarity;
     end
 end
 
-assign ovalid = fifo_phase_rd_valid;
-assign osop = (fifo_phase0_rdata.sop | fifo_phase1_rdata.sop) & ovalid;
-assign oeop = (fifo_phase0_rdata.eop | fifo_phase1_rdata.eop) & ovalid;
-assign odata = {fifo_phase0_rdata.data, fifo_phase1_rdata.data};
+// Error Signaling
+logic err_input_wr_when_full, sticky_err_input_wr_when_full;
+logic err_output_rd_when_empty, sticky_err_output_rd_when_empty;
+logic err_last_read_for_packet_no_eop, sticky_err_last_read_for_packet_no_eop;
+assign err_input_wr_when_full = fifo_full & fifo_wren; // FIFO filled up and input cannot be metered.
+assign err_output_rd_when_empty = fifo_rempty & fifo_rden; // FIFO empty and try to read. Means fundamental failure with reading scheme.
+assign err_last_read_for_packet_no_eop = last_read_for_packet_q & fifo_rdata.eop; // Last read for packet (determined by packet length) does not have EOP on output.
+
+always_ff @( posedge iclk, posedge irst ) begin
+  if(irst) begin
+    sticky_err_input_wr_when_full <= 1'b0;
+  end else begin
+    sticky_err_input_wr_when_full <= err_input_wr_when_full | sticky_err_input_wr_when_full;
+  end
+end
+
+always_ff @( posedge iclk, posedge irst ) begin
+  if(irst) begin
+    sticky_err_output_rd_when_empty <= 1'b0;
+    sticky_err_last_read_for_packet_no_eop <= 1'b0;
+  end else begin
+    sticky_err_output_rd_when_empty <= err_output_rd_when_empty | sticky_err_output_rd_when_empty;
+    sticky_err_last_read_for_packet_no_eop <= err_last_read_for_packet_no_eop | sticky_err_last_read_for_packet_no_eop;
+  end
+end
+
+// Output assignments
+assign ovalid = fifo_phase_rd_valid & ~fifo_rdata.bad;
+assign osop = fifo_rdata.sop & ovalid;
+assign oeop = fifo_rdata.eop & ovalid;
+// Swap LSW to MSW since we are using a shift register at the beginning to shift data in at input
+// If only 1 word comes in and we get an eop, we need to fix the data at some point (best spot for timing is at output)
+assign odata = debug_half_polarity_q ? {fifo_rdata.data[31:0], 32'd0} : fifo_rdata.data;
 assign oplen = fifo_meta_rd_data.oplen;
 assign obad = fifo_meta_rd_data.bad;
+assign odebug_half_polarity = debug_half_polarity_q & ovalid;
 
 endmodule
