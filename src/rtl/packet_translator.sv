@@ -93,7 +93,7 @@ logic fifo_meta_rempty;
 
 // Initial is driven based off of ivalid & isop
 // Addition is driven based off of ivalid & ieop
-assign init_val = (ivalid & isop) ? '0 : (ivalid ? pkt_byte_cntr : '0);
+assign init_val = (ivalid & isop) ? '0 : pkt_byte_cntr;
 assign increment_val = (ivalid & ieop) ? (~|iresidual ? 3'd4 : {1'b0, iresidual}) : (ivalid ? 3'd4 : '0);
 
 always_ff @(posedge iclk, posedge irst) begin : proc_pkt_byte_cntr
@@ -155,6 +155,7 @@ always_comb begin
   plen = '0;
   next_state = curr_state;
   case (curr_state)
+    // Wait for packet to show up in Metadata FIFO entry
     IDLE: begin
       if (~fifo_meta_rempty & oready) begin
         fifo_meta_rden = 1'b1;
@@ -164,11 +165,14 @@ always_comb begin
         next_state = IDLE;
       end
     end
+    // Read Metadata FIFO entry into latching registers
     META: begin
       pkt_len_remaining = fifo_meta_rd_data.oplen;
       meta_bad = fifo_meta_rd_data.bad;
       next_state = SOP;
     end
+    // Begin reading packet data FIFO when ready.
+    // Set SOP then move onto DATA
     SOP: begin
       if (oready & |pkt_len_remaining_q) begin
         fifo_rden = 1'b1;
@@ -183,6 +187,10 @@ always_comb begin
         next_state = SOP;
       end
     end
+    // Continue reading packet data FIFO until we reach last cycle of packet
+    // When last cycle is reached, assert EOP
+    // Check to see if there is a packet in metadata FIFO, if there is go to META state
+    // Else go back to IDLE
     DATA: begin
       if (oready) begin
         if(pkt_len_remaining_q <= 8) begin
@@ -258,7 +266,7 @@ assign oeop = eop_q & ovalid;
 // If only 1 word comes in and we get an eop, we need to fix the data at some point (best spot for timing is at output)
 assign odata = half_word_valid_q ? {fifo_rdata[31:0], 32'd0} : fifo_rdata;
 assign oplen = plen_q;
-assign obad = fifo_meta_rd_data.bad;
+assign obad = meta_bad_q;
 assign ohalf_word_valid = half_word_valid_q & ovalid;
 
 assign ocpu_interrupt = sticky_err_input_wr_when_full | sticky_err_output_rd_when_empty;
