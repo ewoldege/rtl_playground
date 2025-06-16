@@ -71,6 +71,7 @@ module tb_packet_translator;
 
     initial begin
         #100
+        ivalid = 1'b0;
         irst_n = 1'b1;
         orst_n = 1'b1;
         #100
@@ -78,7 +79,6 @@ module tb_packet_translator;
         orst_n = 1'b0;
         #100
         @(posedge iclk);
-        oready = 1'b1;
         @(posedge iclk);
         forever begin
             if (pkt_struct_queue.size() > 0) begin
@@ -137,6 +137,15 @@ module tb_packet_translator;
             end
             @(posedge iclk);
         end 
+    end
+
+    int oready_random_value;
+    initial begin
+        forever begin
+            bad_random_value = $urandom_range(0,3);
+            oready = (bad_random_value == 0) ? 1'b0 : 1'b1;
+            @(posedge oclk);
+        end
     end
 
     // Scoreboard
@@ -207,7 +216,7 @@ module tb_packet_translator;
         $dumpfile("wave.vcd");
         $dumpvars(0, tb_packet_translator);
         $display("Hello, start of test %0t", $time);
-        #10000000;
+        #1000000;
         $display("Checked values = %d . Passing values = %d", checked_values, passing_values);
         #20
         $finish;
