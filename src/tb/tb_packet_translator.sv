@@ -6,7 +6,7 @@ module tb_packet_translator;
     logic isop, ieop, ivalid, ibad;
     logic [INPUT_WIDTH-1:0] idata;
     logic [1:0] iresidual;
-    logic osop, oeop, ovalid, odebug_half_polarity, obad, oready, ocpu_interrupt;
+    logic osop, oeop, ovalid, ohalf_word_valid, obad, oready, ocpu_interrupt;
     logic [OUTPUT_WIDTH-1:0] odata;
     logic [13:0] oplen;
 
@@ -44,7 +44,7 @@ module tb_packet_translator;
         .oclk (oclk),
         .orst (orst_n),
         .ovalid(ovalid),
-        .odebug_half_polarity(odebug_half_polarity),
+        .ohalf_word_valid(ohalf_word_valid),
         .osop(osop),
         .oeop(oeop),
         .oplen(oplen),
@@ -144,19 +144,19 @@ module tb_packet_translator;
     pkt_out_struct_t scoreboard_expected_result, scoreboard_actual_result;
     logic [13:0] scoreboard_len_expected_result;
     logic valid_q;
-    logic debug_half_polarity_q;
+    logic half_word_valid_q;
     logic check_the_value;
     logic [31:0] checked_values, passing_values, pass_induced_err_values;
 
     always_ff @( posedge oclk ) begin : scoreboard_ff
         valid_q <= ovalid;
-        debug_half_polarity_q <= odebug_half_polarity;
-        scoreboard_actual_result.data <= odebug_half_polarity ? {odata[63:32], 32'd0} : odata;
+        half_word_valid_q <= ohalf_word_valid;
+        scoreboard_actual_result.data <= ohalf_word_valid ? {odata[63:32], 32'd0} : odata;
         scoreboard_actual_result.sop <= osop;
         scoreboard_actual_result.eop <= oeop;
         scoreboard_actual_result.oplen <= oplen;
         scoreboard_actual_result.bad <= obad;
-        if (odebug_half_polarity) begin
+        if (ohalf_word_valid) begin
             scoreboard_expected_result0 = pkt_struct_sb_queue.pop_front();
             scoreboard_expected_result1 = '0;
         end else if (ovalid) begin

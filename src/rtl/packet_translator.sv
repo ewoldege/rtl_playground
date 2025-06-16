@@ -22,7 +22,7 @@ module packet_translator
     output logic [OUTPUT_WIDTH-1:0] odata,
     input  logic oready,
     output logic obad,
-    output logic odebug_half_polarity,
+    output logic ohalf_word_valid,
 
     output logic ocpu_interrupt // Fatal error
 );
@@ -86,8 +86,7 @@ assign input_data.bad = ibad;
 // Phase values toggle between 0 and 1. 
 // Start of the packet always starts with toggle value of 0.
 // As new valid cycles come through, the toggle bit flips.
-// Phase 0 FIFO wren is enabled when toggle == 0.
-// Phase 1 FIFO wren is enabled when toggle == 1.
+// When a new valid cycle comes in, and 
 assign phase_wren_toggle = (isop & ivalid) ? 1'b0 : (ivalid ? ~phase_wren_toggle_q : phase_wren_toggle_q);
 assign shift_data = ivalid ? {shift_data_q[0], input_data} : shift_data_q;
 always_ff @(posedge iclk) begin
@@ -96,11 +95,11 @@ always_ff @(posedge iclk) begin
 end
 
 assign fifo_wren = ivalid & (phase_wren_toggle | ieop);
-// Common FIFO Write Data
-assign fifo_wr_data.sop = fifo_wren ? shift_data[0].sop | shift_data[1].sop : 1'b0;
-assign fifo_wr_data.eop = fifo_wren ? shift_data[0].eop | shift_data[1].eop : 1'b0;
-assign fifo_wr_data.data = fifo_wren ? {shift_data[1].data, shift_data[0].data} : '0;
-assign fifo_wr_data.bad = fifo_wren ? (shift_data[0].bad | shift_data[1].bad) : 1'b0; // TODO May need to qualify this with eop and valid
+
+assign fifo_wr_data.sop = shift_data[0].sop | shift_data[1].sop;
+assign fifo_wr_data.eop = shift_data[0].eop | shift_data[1].eop;
+assign fifo_wr_data.data ={shift_data[1].data, shift_data[0].data};
+assign fifo_wr_data.bad = (shift_data[0].bad | shift_data[1].bad);
 
 async_fifo fifo_data
     (
@@ -108,20 +107,12 @@ async_fifo fifo_data
         .rst (irst),
         .wr_en(fifo_wren),
         .din(fifo_wr_data),
-        .full(fifo_full), // TODO Connect full to detect errors on incoming signal since we cannot backpressure input
+        .full(fifo_full),
         .rd_clk(oclk),
         .rd_en(fifo_rden),
         .dout(fifo_rdata),
         .empty(fifo_rempty)
     );
-
-logic fifo_phase1_wren;
-logic fifo_phase1_full;
-logic fifo_phase1_rden;
-fifo_data_t fifo_phase1_rdata;
-logic fifo_phase1_rempty;
-
-assign fifo_phase1_wren = ivalid & phase_wren_toggle;
 
 fifo_meta_t fifo_meta_wr_data;
 fifo_meta_t fifo_meta_rd_data;
@@ -195,14 +186,14 @@ always_comb begin
     end
     endcase 
 end
-
-assign fifo_rden = pf_ready & oready & |pkt_len_remaining_q; // Not checking empty flag of FIFO because logic should handle this. Assertion in place to catch this if it happens
+// Not checking empty flag of FIFO because logic should handle this. Assertion in place to catch this if it happens
+assign fifo_rden = pf_ready & oready & |pkt_len_remaining_q; 
 logic [13:0] pkt_len_remaining, pkt_len_remaining_q;
-logic debug_half_polarity, debug_half_polarity_q;
+logic half_word_valid, half_word_valid_q;
 
 assign pkt_len_remaining = fifo_meta_rden_q ? fifo_meta_rd_data.oplen : oready ? (((pkt_len_remaining_q <= 8) ? '0 : pkt_len_remaining_q - 8)) : pkt_len_remaining_q;
 assign last_read_for_packet = (pkt_len_remaining_q <= 8) & fifo_rden;
-assign debug_half_polarity = (pkt_len_remaining_q <= 4) & fifo_rden; // Only for debug purposes
+assign half_word_valid = (pkt_len_remaining_q <= 4) & fifo_rden; // Used to detect if we need to swap LSW and MSW words due to input FIFO WR data sequence
 
 
 logic fifo_phase_rd_valid;
@@ -215,7 +206,7 @@ always_ff @( posedge oclk, posedge orst ) begin
         pkt_len_remaining_q <= pkt_len_remaining;
         fifo_phase_rd_valid <= fifo_rden;
         last_read_for_packet_q <= last_read_for_packet;
-        debug_half_polarity_q <= debug_half_polarity;
+        half_word_valid_q <= half_word_valid;
     end
 end
 
@@ -251,9 +242,11 @@ assign osop = fifo_rdata.sop & ovalid;
 assign oeop = fifo_rdata.eop & ovalid;
 // Swap LSW to MSW since we are using a shift register at the beginning to shift data in at input
 // If only 1 word comes in and we get an eop, we need to fix the data at some point (best spot for timing is at output)
-assign odata = debug_half_polarity_q ? {fifo_rdata.data[31:0], 32'd0} : fifo_rdata.data;
+assign odata = half_word_valid_q ? {fifo_rdata.data[31:0], 32'd0} : fifo_rdata.data;
 assign oplen = fifo_meta_rd_data.oplen;
 assign obad = fifo_meta_rd_data.bad;
-assign odebug_half_polarity = debug_half_polarity_q & ovalid;
+assign ohalf_word_valid = half_word_valid_q & ovalid;
+
+assign ocpu_interrupt = sticky_err_input_wr_when_full | sticky_err_output_rd_when_empty | sticky_err_last_read_for_packet_no_eop;
 
 endmodule
