@@ -13,7 +13,7 @@ module packet_translator
     input logic [INPUT_WIDTH-1:0] idata,
     input logic ibad,
 
-    output logic oclk,
+    input  logic oclk,
     input  logic orst,
     output logic ovalid,
     output logic osop,
@@ -49,7 +49,7 @@ logic fifo_meta_wr_en, fifo_meta_wr_en_q;
 
 logic [OUTPUT_WIDTH-1:0] fifo_wr_data;
 logic fifo_full;
-logic fifo_rden;
+logic fifo_rden, fifo_rd_en_q;
 logic [OUTPUT_WIDTH-1:0] fifo_rdata;
 logic fifo_rempty;
 logic phase_wren_toggle, phase_wren_toggle_q;
@@ -88,7 +88,7 @@ async_fifo fifo_data
 fifo_meta_t fifo_meta_wr_data;
 fifo_meta_t fifo_meta_rd_data;
 logic fifo_meta_full;
-logic fifo_meta_rden, fifo_meta_rden_q;
+logic fifo_meta_rden;
 logic fifo_meta_rempty;
 
 // Initial is driven based off of ivalid & isop
@@ -107,7 +107,7 @@ always_ff @(posedge iclk, posedge irst) begin : proc_pkt_byte_cntr
     end
 end
 
-assign fifo_meta_wr_data.bad = bad_q;
+assign fifo_meta_wr_data.bad = bad_2q;
 assign fifo_meta_wr_data.oplen = pkt_byte_cntr;
 assign fifo_meta_wr_data.reserved = '0;
 
@@ -115,7 +115,7 @@ async_fifo fifo_meta
     (
         .wr_clk (iclk),
         .rst (irst),
-        .wr_en(fifo_meta_wr_en), 
+        .wr_en(fifo_meta_wr_en_q), 
         .din(fifo_meta_wr_data), 
         .full(fifo_meta_full),
         .rd_clk(oclk),
@@ -124,17 +124,20 @@ async_fifo fifo_meta
         .empty(fifo_meta_rempty)
     );
 
-typedef enum {IDLE, DATA} state_t;
+typedef enum {IDLE, META, SOP, DATA} state_t;
 state_t curr_state, next_state;
-logic pf_ready;
-logic last_read_for_packet, last_read_for_packet_q;
+logic sop, sop_q;
+logic eop, eop_q;
+logic meta_bad, meta_bad_q;
+// Not checking empty flag of FIFO because logic should handle this. Assertion in place to catch this if it happens
+logic [13:0] pkt_len_remaining, pkt_len_remaining_q;
+logic [13:0] plen, plen_q;
 
 always_ff @( posedge oclk, posedge orst ) begin
     if (orst) begin
         curr_state <= IDLE;
     end else begin
         curr_state <= next_state;
-        fifo_meta_rden_q <= fifo_meta_rden;
     end
 end
 
@@ -143,64 +146,85 @@ end
 // DATA state indicates prefetch is ready. If we receive EOP from reading the data FIFOs, then initiate another prefetch for the next packet.
 // If there is no data in the metadata FIFO to prefetch, go back to IDLE. Else issue a read enable and stay in the DATA state.
 always_comb begin
+  sop = 1'b0;
+  eop = 1'b0;
+  fifo_meta_rden = 1'b0;
+  fifo_rden = 1'b0;
+  pkt_len_remaining = pkt_len_remaining_q;
+  meta_bad = meta_bad_q;
+  plen = '0;
+  next_state = curr_state;
   case (curr_state)
     IDLE: begin
-      pf_ready = 1'b0;
       if (~fifo_meta_rempty & oready) begin
         fifo_meta_rden = 1'b1;
-        next_state = DATA;
+        next_state = META;
       end else begin
         fifo_meta_rden = 1'b0;
         next_state = IDLE;
       end
     end
-    DATA: begin
-      pf_ready = 1'b1;
-      if (last_read_for_packet & ~fifo_meta_rempty) begin
-        fifo_meta_rden = 1'b1;
+    META: begin
+      pkt_len_remaining = fifo_meta_rd_data.oplen;
+      meta_bad = fifo_meta_rd_data.bad;
+      next_state = SOP;
+    end
+    SOP: begin
+      if (oready & |pkt_len_remaining_q) begin
+        fifo_rden = 1'b1;
+        plen = pkt_len_remaining_q;
+        pkt_len_remaining = pkt_len_remaining_q - 8;
+        sop = 1'b1;
         next_state = DATA;
-      end else if (last_read_for_packet) begin
-        fifo_meta_rden = 1'b0;
-        next_state = IDLE;
       end else begin
-        fifo_meta_rden = 1'b0;
+        fifo_rden = 1'b0;
+        pkt_len_remaining = pkt_len_remaining_q;
+        sop = 1'b0;
+        next_state = SOP;
+      end
+    end
+    DATA: begin
+      if (oready) begin
+        if(pkt_len_remaining_q <= 8) begin
+          pkt_len_remaining = '0;
+          eop = 1'b1;
+          fifo_rden = 1'b1;
+          if(~fifo_meta_rempty) begin
+            fifo_meta_rden = 1'b1;
+            next_state = META;
+          end else begin
+            fifo_meta_rden = 1'b0;
+            next_state = IDLE;
+          end
+        end else begin
+          fifo_rden = 1'b1;
+          pkt_len_remaining = pkt_len_remaining_q - 8;
+          next_state = DATA;
+        end
+      end else begin
+        fifo_rden = 1'b0;
         next_state = DATA;
       end
     end
     endcase 
 end
-// Not checking empty flag of FIFO because logic should handle this. Assertion in place to catch this if it happens
-assign fifo_rden = pf_ready & oready & |pkt_len_remaining_q; 
-logic [13:0] pkt_len_remaining, pkt_len_remaining_q, pkt_len_remaining_2q;
+
 logic half_word_valid, half_word_valid_q;
-logic currently_reading, currently_reading_q;
-logic generated_sop;
-logic meta_bad;
-
-assign pkt_len_remaining = fifo_meta_rden_q ? fifo_meta_rd_data.oplen : oready ? (((pkt_len_remaining_q <= 8) ? '0 : pkt_len_remaining_q - 8)) : pkt_len_remaining_q;
-assign last_read_for_packet = (pkt_len_remaining_q <= 8) & fifo_rden;
 assign half_word_valid = (pkt_len_remaining_q <= 4) & fifo_rden; // Used to detect if we need to swap LSW and MSW words due to input FIFO WR data sequence
-// Signal indicating if we are currently reading out a packet or not.
-// Valid is not enough since that is sensitive on oready
-assign currently_reading = last_read_for_packet_q ? 1'b0 : (fifo_phase_rd_valid ? 1'b1 : currently_reading_q);
-assign generated_sop = currently_reading & ~currently_reading_q;
 
-logic fifo_phase_rd_valid;
 always_ff @( posedge oclk, posedge orst ) begin
     if (orst) begin
-        fifo_phase_rd_valid <= 1'b0;
-        last_read_for_packet_q <= 1'b0;
+        fifo_rd_en_q <= 1'b0;
         pkt_len_remaining_q <= '0;
-        currently_reading_q <= 1'b0;
-        meta_bad <= 1'b0;
+        meta_bad_q <= 1'b0;
     end else begin
         pkt_len_remaining_q <= pkt_len_remaining;
-        pkt_len_remaining_2q <= pkt_len_remaining_q;
-        fifo_phase_rd_valid <= fifo_rden;
-        last_read_for_packet_q <= last_read_for_packet;
+        fifo_rd_en_q <= fifo_rden;
         half_word_valid_q <= half_word_valid;
-        currently_reading_q <= currently_reading;
-        meta_bad <= fifo_meta_rd_data.bad;
+        meta_bad_q <= meta_bad;
+        sop_q <= sop;
+        eop_q <= eop;
+        plen_q <= plen;
     end
 end
 
@@ -227,13 +251,13 @@ always_ff @( posedge iclk, posedge irst ) begin
 end
 
 // Output assignments
-assign ovalid = fifo_phase_rd_valid & ~meta_bad;
-assign osop = generated_sop & ovalid;
-assign oeop = last_read_for_packet_q & ovalid;
+assign ovalid = fifo_rd_en_q & ~meta_bad_q;
+assign osop = sop_q & ovalid;
+assign oeop = eop_q & ovalid;
 // Swap LSW to MSW since we are using a shift register at the beginning to shift data in at input
 // If only 1 word comes in and we get an eop, we need to fix the data at some point (best spot for timing is at output)
 assign odata = half_word_valid_q ? {fifo_rdata[31:0], 32'd0} : fifo_rdata;
-assign oplen = fifo_meta_rd_data.oplen;
+assign oplen = plen_q;
 assign obad = fifo_meta_rd_data.bad;
 assign ohalf_word_valid = half_word_valid_q & ovalid;
 
