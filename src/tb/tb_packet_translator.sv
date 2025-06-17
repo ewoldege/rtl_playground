@@ -142,8 +142,8 @@ module tb_packet_translator;
     int oready_random_value;
     initial begin
         forever begin
-            bad_random_value = $urandom_range(0,3);
-            oready = (bad_random_value == 0) ? 1'b0 : 1'b1;
+            oready_random_value = $urandom_range(0,1);
+            oready = (oready_random_value == 0) ? 1'b0 : 1'b1;
             @(posedge oclk);
         end
     end
@@ -200,7 +200,7 @@ module tb_packet_translator;
                     // $display("Successful check - oplen mismatch on boundary that we dont care about");
                     passing_values = passing_values + 1;
                 end else begin
-                    $display("Failed addition, expected result %h, actual result %h, time = %t", scoreboard_expected_result.data, scoreboard_actual_result.data, $time);
+                    $display("Failed addition, expected result %h, actual result %h, exp_len = %d, actual_len %d,  time = %t", scoreboard_expected_result.data, scoreboard_actual_result.data, scoreboard_expected_result.oplen, scoreboard_actual_result.oplen, $time);
                     passing_values = passing_values;
                     $error("ERROR");
                 end

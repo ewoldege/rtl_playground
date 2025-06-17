@@ -46,30 +46,75 @@ logic [2:0]  increment_val;
 logic fifo_meta_wr_en, fifo_meta_wr_en_q;
 
 
-
+// Packet Data FIFO
 logic [OUTPUT_WIDTH-1:0] fifo_wr_data;
 logic fifo_full;
+logic fifo_afull;
 logic fifo_rden, fifo_rd_en_q;
 logic [OUTPUT_WIDTH-1:0] fifo_rdata;
 logic fifo_rempty;
+
+// Metadata FIFO
+fifo_meta_t fifo_meta_wr_data;
+fifo_meta_t fifo_meta_rd_data;
+logic fifo_meta_full;
+logic fifo_meta_afull;
+logic fifo_meta_rden;
+logic fifo_meta_rempty;
+
 logic phase_wren_toggle, phase_wren_toggle_q;
 logic [OUTPUT_WIDTH-1:0] shift_data, shift_data_q;
 logic bad_2q, bad_q;
+logic valid_packet;
+logic [63:0] drop_input_packet, drop_input_packet_q;
+typedef enum {WR_IDLE, WRITING} wr_state_t;
+wr_state_t wr_curr_state, wr_next_state;
+
+always_comb begin
+  drop_input_packet = drop_input_packet_q;
+  case (wr_curr_state)
+    WR_IDLE: begin
+      // Check to see if there is enough for a 9K packet inside the packet data FIFO
+      // Also check to see if there is an entry open in the metadata FIFO
+      // If either of these
+      if(isop & ivalid) begin
+        if(fifo_afull | fifo_meta_full) begin
+          drop_input_packet = drop_input_packet_q + 1;
+          valid_packet = 1'b0;
+          wr_next_state = WR_IDLE;
+        end else begin
+          valid_packet = 1'b1;
+          wr_next_state = WRITING;
+        end
+      end else begin
+        valid_packet = 1'b0;
+        wr_next_state = WR_IDLE;
+      end
+    end
+    WRITING: begin
+      valid_packet = 1'b1;
+      if(ieop & ivalid) begin
+        wr_next_state = WR_IDLE;
+      end else begin
+        wr_next_state = WRITING;
+      end
+    end
+  endcase
+end
 
 // Phase values toggle between 0 and 1. 
 // Start of the packet always starts with toggle value of 0.
 // As new valid cycles come through, the toggle bit flips.
 // When a new valid cycle comes in, and 
-assign phase_wren_toggle = (isop & ivalid) ? 1'b0 : (ivalid ? ~phase_wren_toggle_q : phase_wren_toggle_q);
-assign shift_data = ivalid ? {shift_data_q[INPUT_WIDTH-1:0], idata} : shift_data_q;
+assign phase_wren_toggle = (isop & ivalid & valid_packet) ? 1'b0 : ((ivalid & valid_packet) ? ~phase_wren_toggle_q : phase_wren_toggle_q);
+assign shift_data = (ivalid & valid_packet) ? {shift_data_q[INPUT_WIDTH-1:0], idata} : shift_data_q;
 always_ff @(posedge iclk) begin
   phase_wren_toggle_q <= phase_wren_toggle;
   shift_data_q <= shift_data;
   bad_q <= ibad;
-  bad_2q <= bad_q;
 end
 
-assign fifo_wren = ivalid & (phase_wren_toggle | ieop);
+assign fifo_wren = valid_packet & ivalid & (phase_wren_toggle | ieop);
 assign fifo_wr_data = shift_data;
 
 async_fifo fifo_data
@@ -79,17 +124,12 @@ async_fifo fifo_data
         .wr_en(fifo_wren),
         .din(fifo_wr_data),
         .full(fifo_full),
+        .almost_full(fifo_afull),
         .rd_clk(oclk),
         .rd_en(fifo_rden),
         .dout(fifo_rdata),
         .empty(fifo_rempty)
     );
-
-fifo_meta_t fifo_meta_wr_data;
-fifo_meta_t fifo_meta_rd_data;
-logic fifo_meta_full;
-logic fifo_meta_rden;
-logic fifo_meta_rempty;
 
 // Initial is driven based off of ivalid & isop
 // Addition is driven based off of ivalid & ieop
@@ -100,10 +140,15 @@ always_ff @(posedge iclk, posedge irst) begin : proc_pkt_byte_cntr
     if(irst) begin
         pkt_byte_cntr <= '0;
         fifo_meta_wr_en <= 1'b0;
+        wr_curr_state <= WR_IDLE;
+        fifo_meta_wr_en_q <= 1'b0;
+        drop_input_packet_q <= '0;
     end else begin
         pkt_byte_cntr <= init_val + increment_val;
-        fifo_meta_wr_en <= ivalid & ieop;
+        fifo_meta_wr_en <= ivalid & ieop & valid_packet;
         fifo_meta_wr_en_q <= fifo_meta_wr_en;
+        wr_curr_state <= wr_next_state;
+        drop_input_packet_q <= drop_input_packet;
     end
 end
 
@@ -118,6 +163,7 @@ async_fifo fifo_meta
         .wr_en(fifo_meta_wr_en_q), 
         .din(fifo_meta_wr_data), 
         .full(fifo_meta_full),
+        .almost_full(fifo_meta_afull),
         .rd_clk(oclk),
         .rd_en(fifo_meta_rden),
         .dout(fifo_meta_rd_data),
