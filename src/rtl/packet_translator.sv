@@ -112,6 +112,7 @@ always_ff @(posedge iclk) begin
   phase_wren_toggle_q <= phase_wren_toggle;
   shift_data_q <= shift_data;
   bad_q <= ibad;
+  bad_2q <= bad_q;
 end
 
 assign fifo_wren = valid_packet & ivalid & (phase_wren_toggle | ieop);

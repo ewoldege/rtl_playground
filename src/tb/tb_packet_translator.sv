@@ -142,7 +142,7 @@ module tb_packet_translator;
     int oready_random_value;
     initial begin
         forever begin
-            oready_random_value = $urandom_range(0,1);
+            oready_random_value = $urandom_range(0,3);
             oready = (oready_random_value == 0) ? 1'b0 : 1'b1;
             @(posedge oclk);
         end
