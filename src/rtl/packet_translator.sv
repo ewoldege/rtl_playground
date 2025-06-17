@@ -66,12 +66,14 @@ logic phase_wren_toggle, phase_wren_toggle_q;
 logic [OUTPUT_WIDTH-1:0] shift_data, shift_data_q;
 logic bad_2q, bad_q;
 logic valid_packet;
+logic afull_drop_case, afull_drop_case_q, afull_drop_case_2q;
 logic [63:0] drop_input_packet, drop_input_packet_q;
 typedef enum {WR_IDLE, WRITING} wr_state_t;
 wr_state_t wr_curr_state, wr_next_state;
 
 always_comb begin
   drop_input_packet = drop_input_packet_q;
+  afull_drop_case = 1'b0;
   case (wr_curr_state)
     WR_IDLE: begin
       // Check to see if there is enough for a 9K packet inside the packet data FIFO
@@ -93,7 +95,10 @@ always_comb begin
     end
     WRITING: begin
       valid_packet = 1'b1;
-      if(ieop & ivalid) begin
+      if(fifo_afull & ivalid) begin
+        afull_drop_case = 1'b1;
+        wr_next_state = WR_IDLE;
+      end else if(ieop & ivalid) begin
         wr_next_state = WR_IDLE;
       end else begin
         wr_next_state = WRITING;
@@ -113,9 +118,11 @@ always_ff @(posedge iclk) begin
   shift_data_q <= shift_data;
   bad_q <= ibad;
   bad_2q <= bad_q;
+  afull_drop_case_q <= afull_drop_case;
+  afull_drop_case_2q <= afull_drop_case_q;
 end
 
-assign fifo_wren = valid_packet & ivalid & (phase_wren_toggle | ieop);
+assign fifo_wren = valid_packet & ivalid & (phase_wren_toggle | ieop | afull_drop_case);
 assign fifo_wr_data = shift_data;
 
 async_fifo fifo_data
@@ -146,14 +153,14 @@ always_ff @(posedge iclk, posedge irst) begin : proc_pkt_byte_cntr
         drop_input_packet_q <= '0;
     end else begin
         pkt_byte_cntr <= init_val + increment_val;
-        fifo_meta_wr_en <= ivalid & ieop & valid_packet;
+        fifo_meta_wr_en <= ivalid & (ieop | afull_drop_case) & valid_packet;
         fifo_meta_wr_en_q <= fifo_meta_wr_en;
         wr_curr_state <= wr_next_state;
         drop_input_packet_q <= drop_input_packet;
     end
 end
 
-assign fifo_meta_wr_data.bad = bad_2q;
+assign fifo_meta_wr_data.bad = bad_2q | afull_drop_case_2q;
 assign fifo_meta_wr_data.oplen = pkt_byte_cntr;
 assign fifo_meta_wr_data.reserved = '0;
 
