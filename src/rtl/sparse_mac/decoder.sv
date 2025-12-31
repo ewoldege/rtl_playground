@@ -26,7 +26,9 @@ logic decoder_fifo_empty;
 logic decoder_fifo_rvalid;
 
 assign decoder_fifo_wren = sram_valid_i & sram_ready_o;
-assign decoder_fifo_rden = ~decoder_fifo_empty & output_buffer_ready;
+// FIFO should only read when it knows downstream can consume it
+// Decoder accumulator is not churning on anything when fifo_rd_valid and current_index_valid are both low
+assign decoder_fifo_rden = ~decoder_fifo_empty & ~(decoder_fifo_rvalid || current_index_valid);
 
 fifo_sync 
 #(
@@ -36,13 +38,13 @@ fifo_sync
 inp_buffer
     (
         .clk (mac_clk),
-        .rstn (mac_rst),
-        .i_wren(decoder_fifo_wren),
-        .i_wrdata(sram_data_i),
-        .o_full(decoder_fifo_full),
-        .i_rden(decoder_fifo_rden),
-        .o_rddata(decoder_fifo_rdata),
-        .o_empty(decoder_fifo_empty)
+        .rst_n (mac_rst),
+        .wr_en(decoder_fifo_wren),
+        .wr_data(sram_data_i),
+        .full(decoder_fifo_full),
+        .rd_en(decoder_fifo_rden),
+        .rd_data(decoder_fifo_rdata),
+        .empty(decoder_fifo_empty)
     );
 
 always_ff @(posedge mac_clk or negedge mac_rst) begin
@@ -69,11 +71,16 @@ always_ff @(posedge mac_clk or negedge mac_rst) begin
         current_index <= '1;
         current_index_valid <= 1'b0;
     end else begin
+        // If we receive new data from the FIFO, advance the accumulator
+        // Hold the current_index_valid high until transaction is complete (second if statement)
+        // Upstream FIFO will not provide new data unless this block is ready to accept more
         if(decoder_fifo_rvalid) begin
             current_index_valid <= 1'b1;
             current_index <= current_index + decoder_fifo_rdata.skip + 1;
             current_value <= decoder_fifo_rdata.value;
-        end else if (output_buffer_ready) begin
+        // We will deassert current_index_valid when we have no pending requests in the accumulator to process
+        // and downstream buffer has accepted our previous transaction
+        end else if (current_index_valid & output_buffer_ready) begin
             current_index_valid <= 1'b0;
         end
     end
@@ -98,5 +105,7 @@ out_buffer
         .ready_i(decoder_ready_i),
         .data_o(decoder_data_o)
     );
+
+assign sram_ready_o = ~decoder_fifo_full;
 
 endmodule

@@ -21,7 +21,7 @@ module tb_decoder;
   // DUT
   decoder dut (
     .mac_clk(mac_clk),
-    .mac_rst(mac_rst),
+    .mac_rst(~mac_rst),
 
     .sram_valid_i(sram_valid_i),
     .sram_ready_o(sram_ready_o),
@@ -58,12 +58,14 @@ module tb_decoder;
     expected_q.delete();
     repeat (5) @(posedge mac_clk);
     mac_rst = 0;
+    repeat (5) @(posedge mac_clk);
   endtask
 
   // ----------------------------
   // Drive one SRAM transaction
   // ----------------------------
   task automatic send_sram(input int skip, input int value);
+    #2 
     sram_data_i.skip  = skip;
     sram_data_i.value = value;
     sram_valid_i      = 1;
@@ -77,6 +79,7 @@ module tb_decoder;
     expected_q.push_back('{ index: golden_index, value: value });
     golden_index += 1;
 
+    #2
     sram_valid_i = 0;
   endtask
 

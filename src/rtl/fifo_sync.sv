@@ -1,148 +1,85 @@
-//     %%%%%%%%%%%%      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-//  %%%%%%%%%%%%%%%%%%                      
-// %%%%%%%%%%%%%%%%%%%% %%                
-//    %% %%%%%%%%%%%%%%%%%%                
-//        % %%%%%%%%%%%%%%%                 
-//           %%%%%%%%%%%%%%                 ////    O P E N - S O U R C E     ////////////////////////////////////////////////////////////
-//           %%%%%%%%%%%%%      %%          _________________________________////
-//           %%%%%%%%%%%       %%%%                ________    _                             __      __                _     
-//          %%%%%%%%%%        %%%%%%              / ____/ /_  (_)___  ____ ___  __  ______  / /__   / /   ____  ____ _(_)____ TM 
-//         %%%%%%%    %%%%%%%%%%%%*%%%           / /   / __ \/ / __ \/ __ `__ \/ / / / __ \/ //_/  / /   / __ \/ __ `/ / ___/
-//        %%%%% %%%%%%%%%%%%%%%%%%%%%%%         / /___/ / / / / /_/ / / / / / / /_/ / / / / ,<    / /___/ /_/ / /_/ / / /__  
-//       %%%%*%%%%%%%%%%%%%  %%%%%%%%%          \____/_/ /_/_/ .___/_/ /_/ /_/\__,_/_/ /_/_/|_|  /_____/\____/\__, /_/\___/
-//       %%%%%%%%%%%%%%%%%%%    %%%%%%%%%                   /_/                                              /____/  
-//       %%%%%%%%%%%%%%%%                                                             ___________________________________________________               
-//       %%%%%%%%%%%%%%                    //////////////////////////////////////////////       c h i p m u n k l o g i c . c o m    //// 
-//         %%%%%%%%%                       
-//           %%%%%%%%%%%%%%%%               
-//    
-//----%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-//----%% 
-//----%% File Name        : fifo.sv
-//----%% Module Name      : FIFO                                            
-//----%% Developer        : Mitu Raj, chip@chipmunklogic.com
-//----%% Vendor           : Chipmunk Logic ™ , https://chipmunklogic.com
-//----%%
-//----%% Description      : Single-clock Synchronous FIFO of generic size.
-//----%%                    - Configurable Data width, Depth, Almost-full/empty flags
-//----%%
-//----%% Tested on        : -
-//----%% Last modified on : Nov-2025
-//----%% Notes            : -
-//----%%                  
-//----%% Copyright        : Open-source license, see README.md
-//----%%                                                                                             
-//----%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-//###################################################################################################################################################
-//                                                              F I F O                                           
-//###################################################################################################################################################
-//`define ALMFLAGS   // Define this macro to generate Almost-full/empty flags
-
-// Module definition
 module fifo_sync #(
-   // Configurable Parameters
-   parameter DATA_W  = 4      ,  // Data width
-   parameter DEPTH   = 8      ,  // Depth of FIFO   
-   `ifdef ALMFLAGS                
-   parameter UPP_TH  = 4      ,  // Upper threshold to generate Almost-full
-   parameter LOW_TH  = 2      ,  // Lower threshold to generate Almost-empty
-   `endif
-
-   // Derived Parameters
-   parameter PTR_SZ  = $clog2(DEPTH)   // Write/Read pointer size
+  parameter int DATA_W = 32,
+  parameter int DEPTH  = 16
 )(
-   input               clk         ,  // Clock
-   input               rstn        ,  // Active-low Synchronous Reset
-                   
-   input               i_wren      ,  // Write Enable
-   input  [DATA_W-1:0] i_wrdata    ,  // Write-data
-   `ifdef ALMFLAGS
-   output              o_alm_full  ,  // Almost-full signal
-   `endif
-   output              o_full      ,  // Full signal
+  input  logic                 clk,
+  input  logic                 rst_n,   // Active-low async reset
 
-   input               i_rden      ,  // Read Enable
-   output [DATA_W-1:0] o_rddata    ,  // Read-data
-   `ifdef ALMFLAGS
-   output              o_alm_empty ,  // Almost-empty signal
-   `endif
-   output              o_empty        // Empty signal
+  // Write interface
+  input  logic                 wr_en,
+  input  logic [DATA_W-1:0]    wr_data,
+  output logic                 full,
+
+  // Read interface
+  input  logic                 rd_en,
+  output logic [DATA_W-1:0]    rd_data,
+  output logic                 empty
 );
 
-//---------------------------------------------------------------------------------------------------------------------
-// Internal Signals/Registers
-//---------------------------------------------------------------------------------------------------------------------
-logic [DATA_W-1:0] dt_arr_rg [DEPTH] ;  // Data array
-logic [PTR_SZ-1:0] wrptr_rg          ;  // Write pointer
-logic [PTR_SZ-1:0] rdptr_rg          ;  // Read pointer
-logic [PTR_SZ-1:0] nxt_wrptr         ;  // Next Write pointer
-logic [PTR_SZ-1:0] nxt_rdptr         ;  // Next Read pointer
-logic [PTR_SZ-0:0] dcount_rg         ;  // Data counter
-      
-logic              wren  ;  // Write Enable signal conditioned with Full signal
-logic              rden  ;  // Read Enable signal conditioned with Empty signal
-logic              full  ;  // Full signal
-logic              empty ;  // Empty signal
+  // ------------------------------------------------------------
+  // Local parameters
+  // ------------------------------------------------------------
+  localparam int ADDR_W = $clog2(DEPTH);
 
-//---------------------------------------------------------------------------------------------------------------------
-// Synchronous logic to write/read from FIFO
-//---------------------------------------------------------------------------------------------------------------------
-always_ff @(posedge clk) begin
-   if (!rstn) begin      
-      dt_arr_rg <= '{default: '0} ;
-      wrptr_rg  <= 0 ;
-      rdptr_rg  <= 0 ;      
-      dcount_rg <= 0 ;
-   end
-   else begin            
-      /* FIFO write logic */            
-      if (wren) begin             
-         dt_arr_rg[wrptr_rg] <= i_wrdata ;  // Data written to FIFO
-         wrptr_rg            <= nxt_wrptr;
-      end
+  // ------------------------------------------------------------
+  // Storage
+  // ------------------------------------------------------------
+  logic [DATA_W-1:0] mem [0:DEPTH-1];
 
-      /* FIFO read logic */
-      if (rden) begin       
-         rdptr_rg <= nxt_rdptr;
-      end
+  logic [ADDR_W-1:0] wr_ptr;
+  logic [ADDR_W-1:0] rd_ptr;
+  logic [ADDR_W:0]   count;   // Needs to count up to DEPTH
 
-      /* FIFO data counter update logic */
-      if (wren && !rden) begin          // Write operation
-         dcount_rg <= dcount_rg + 1 ;
-      end                    
-      else if (!wren && rden) begin     // Read operation
-         dcount_rg <= dcount_rg - 1 ;         
-      end
-   end
-end
+  // ------------------------------------------------------------
+  // Status flags
+  // ------------------------------------------------------------
+  assign full  = (count == DEPTH);
+  assign empty = (count == 0);
 
-// Full and Empty internal
-assign full  = (dcount_rg == DEPTH);
-assign empty = (dcount_rg == 0);
+  // ------------------------------------------------------------
+  // Write logic
+  // ------------------------------------------------------------
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      wr_ptr <= '0;
+    end else if (wr_en && !full) begin
+      mem[wr_ptr] <= wr_data;
+      if (wr_ptr == DEPTH-1)
+        wr_ptr <= '0;
+      else
+        wr_ptr <= wr_ptr + 1'b1;
+    end
+  end
 
-// Write and Read Enables conditioned
-assign wren  = i_wren & !full  ;  // Do not push if FULL
-assign rden  = i_rden & !empty ;  // Do not pop if EMPTY
+  // ------------------------------------------------------------
+  // Read logic
+  // ------------------------------------------------------------
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      rd_ptr  <= '0;
+      rd_data <= '0;
+    end else if (rd_en && !empty) begin
+      rd_data <= mem[rd_ptr];
+      if (rd_ptr == DEPTH-1)
+        rd_ptr <= '0;
+      else
+        rd_ptr <= rd_ptr + 1'b1;
+    end
+  end
 
-// Next Write & Read pointers
-assign nxt_wrptr = (wrptr_rg == DEPTH-1)? 0 : wrptr_rg + 1 ;
-assign nxt_rdptr = (rdptr_rg == DEPTH-1)? 0 : rdptr_rg + 1 ;
-
-// Full and Empty to output
-assign o_full  = full  ;
-assign o_empty = empty ;
-
-`ifdef ALMFLAGS
-// Almost-full and Almost-empty to output
-assign o_alm_full  = (dcount_rg > UPP_TH) ? 1'b1 : 0 ;
-assign o_alm_empty = (dcount_rg < LOW_TH) ? 1'b1 : 0 ;  
-`endif
-
-// Read-data to output
-assign o_rddata = dt_arr_rg[rdptr_rg];   
+  // ------------------------------------------------------------
+  // Count logic (handles simultaneous R/W)
+  // ------------------------------------------------------------
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      count <= '0;
+    end else begin
+      case ({wr_en && !full, rd_en && !empty})
+        2'b10: count <= count + 1'b1;  // write only
+        2'b01: count <= count - 1'b1;  // read only
+        default: count <= count;       // no change or simultaneous
+      endcase
+    end
+  end
 
 endmodule
-//###################################################################################################################################################
-//                                                              F I F O                                           
-//###################################################################################################################################################

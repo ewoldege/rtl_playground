@@ -1,6 +1,6 @@
 module skid_buffer
 #(
-    parameter DATA_W;
+    parameter DATA_W
 )
 (
     input clk,
@@ -37,7 +37,7 @@ always_ff @(posedge clk or negedge rstn) begin
         if(valid_i & ready_o & ~ready_i) begin
             full <= 1'b1;
             data_reg <= data_i;
-        end else (ready_i) begin
+        end else if (ready_i) begin
             full <= 1'b0;
             main_valid <= full ? 1'b1 : valid_i;
             main_reg <= full ? data_reg : data_i;
