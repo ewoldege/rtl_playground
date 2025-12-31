@@ -36,8 +36,6 @@ module tb_data_sampler;
     // Stimulus (Fast Domain - Fire and Forget)
     //---------------------------------------------------------
     initial begin
-        $dumpfile("wave.vcd");
-        $dumpvars(0, tb);
         rst_n   = 1'b0;
         valid_i = 1'b0;
         data_i  = '0;
