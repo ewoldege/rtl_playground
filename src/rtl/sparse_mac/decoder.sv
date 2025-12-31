@@ -28,9 +28,9 @@ logic decoder_fifo_rvalid;
 assign decoder_fifo_wren = sram_valid_i & sram_ready_o;
 // FIFO should only read when it knows downstream can consume it
 // Decoder accumulator is not churning on anything when fifo_rd_valid and current_index_valid are both low
-assign decoder_fifo_rden = ~decoder_fifo_empty & ~(decoder_fifo_rvalid || current_index_valid);
+assign decoder_fifo_rden = ~decoder_fifo_empty & ~(current_index_valid);
 
-fifo_sync 
+fifo_fwft_sync 
 #(
     .DATA_W($bits(sram_data_t)),
     .DEPTH(DECODER_FIFO_DEPTH)
@@ -46,14 +46,6 @@ inp_buffer
         .rd_data(decoder_fifo_rdata),
         .empty(decoder_fifo_empty)
     );
-
-always_ff @(posedge mac_clk or negedge mac_rst) begin
-    if(~mac_rst) begin
-        decoder_fifo_rvalid <= 1'b0;
-    end else begin
-        decoder_fifo_rvalid <= decoder_fifo_rden;
-    end
-end
 
 // Index calculation logic
 // Input comes in with skip and value.
@@ -74,7 +66,7 @@ always_ff @(posedge mac_clk or negedge mac_rst) begin
         // If we receive new data from the FIFO, advance the accumulator
         // Hold the current_index_valid high until transaction is complete (second if statement)
         // Upstream FIFO will not provide new data unless this block is ready to accept more
-        if(decoder_fifo_rvalid) begin
+        if(decoder_fifo_rden) begin
             current_index_valid <= 1'b1;
             current_index <= current_index + decoder_fifo_rdata.skip + 1;
             current_value <= decoder_fifo_rdata.value;
