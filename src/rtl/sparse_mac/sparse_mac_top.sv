@@ -2,7 +2,7 @@ import sparse_mac_pkg::*;
 
 module sparse_mac_top
 #(
-    parameter NUM_DECODERS
+    parameter NUM_DECODERS = 2
 )
 (
 

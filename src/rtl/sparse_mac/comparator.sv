@@ -39,6 +39,13 @@ decoder_data_t[NUM_DECODERS-1:0] decoder_data;
 assign decoder_accept[0] = decoder_ready_o[0] & decoder_valid_i[0];
 assign decoder_accept[1] = decoder_ready_o[1] & decoder_valid_i[1];
 
+// Pre-calculate the comparison flags to save on timing
+logic idx_gt, idx_lt, idx_eq;
+
+assign idx_gt = (decoder_data[0].index > decoder_data[1].index);
+assign idx_lt = (decoder_data[0].index < decoder_data[1].index);
+assign idx_eq = (decoder_data[0].index == decoder_data[1].index);
+
 always_ff @(posedge mac_clk or negedge mac_rst) begin
     if(~mac_rst) begin
         curr_state <= READ_BOTH_DEC;
@@ -85,13 +92,14 @@ always_comb begin
     COMPARE: begin
       if (decoder_data[0].done || decoder_data[1].done) begin
         next_state = DONE;
-      end else if(decoder_data[0].index > decoder_data[1].index) begin
-        next_state = RD_RIGHT_DEC;
-      end else if (decoder_data[0].index < decoder_data[1].index) begin
-        next_state = RD_LEFT_DEC;
-      end else if (decoder_data[0].index == decoder_data[1].index) begin
-        next_state = MATCH;
-      end
+    end else begin
+        unique case ({idx_gt, idx_lt, idx_eq})
+            3'b100:  next_state = RD_RIGHT_DEC; // 0 > 1
+            3'b010:  next_state = RD_LEFT_DEC;  // 0 < 1
+            3'b001:  next_state = MATCH;        // 0 == 1
+            default: next_state = COMPARE;      // Should not happen with 'unique'
+        endcase
+    end
     end
     MATCH: begin
       mac_valid_o = 1'b1;
