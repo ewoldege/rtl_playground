@@ -56,6 +56,7 @@ inp_buffer
 // To make this true for the first instance, the reset value is -1 (or all 1s)
 logic[INDEX_W-1:0] current_index;
 logic current_index_valid;
+logic current_done;
 logic[VALUE_W-1:0] current_value;
 logic output_buffer_ready;
 always_ff @(posedge mac_clk or negedge mac_rst) begin
@@ -70,6 +71,7 @@ always_ff @(posedge mac_clk or negedge mac_rst) begin
             current_index_valid <= 1'b1;
             current_index <= current_index + decoder_fifo_rdata.skip + 1;
             current_value <= decoder_fifo_rdata.value;
+            current_done <= decoder_fifo_rdata.done;
         // We will deassert current_index_valid when we have no pending requests in the accumulator to process
         // and downstream buffer has accepted our previous transaction
         end else if (current_index_valid & output_buffer_ready) begin
@@ -81,6 +83,7 @@ end
 decoder_data_t skid_buffer_inp;
 assign skid_buffer_inp.value = current_value;
 assign skid_buffer_inp.index = current_index;
+assign skid_buffer_inp.done = current_done;
 
 skid_buffer 
 #(
