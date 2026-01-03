@@ -20,11 +20,19 @@ module adder_tree
 localparam int NUM_ELEM_POWER_OF_2 = 2**$clog2(NUM_ELEM);
 localparam ADDER_TREE_LEVELS = $clog2(NUM_ELEM_POWER_OF_2) + 1; // Includes staging level
 
+logic signed [NUM_ELEM-1:0][SUM_W-1:0] adder_tree_ext;
+genvar i;
+generate
+    for (i = 0; i < NUM_ELEM; i=i+1) begin : sign_extend
+        assign adder_tree_ext[i] = SUM_W'($signed(adder_tree_in[i])); // automatic sign-extension
+    end
+endgenerate
+
 logic [ADDER_TREE_LEVELS-1:0] adder_tree_valid;
-logic signed [ADDER_TREE_LEVELS-1:0][NUM_ELEM_POWER_OF_2-1:0][ELEM_W-1:0] adder_tree;
+logic signed [ADDER_TREE_LEVELS-1:0][NUM_ELEM_POWER_OF_2-1:0][SUM_W-1:0] adder_tree;
 
 assign adder_tree_valid[0] = valid_i; // Staging level
-assign adder_tree[0] = { {(NUM_ELEM_POWER_OF_2-NUM_ELEM){ {(ELEM_W){1'b0}} } }, adder_tree_in };
+assign adder_tree[0] = { {(NUM_ELEM_POWER_OF_2-NUM_ELEM){ {(SUM_W){1'b0}} } }, adder_tree_ext };
 
 // Adder Tree
 always_ff @(posedge clk or negedge rst_n) begin
