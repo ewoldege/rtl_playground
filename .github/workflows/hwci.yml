@@ -1,0 +1,36 @@
+name: hwci
+
+on:
+  push:
+    branches: ["**"]
+
+jobs:
+  verilator-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout RTL repo
+        uses: actions/checkout@v4
+
+      - name: Install Verilator
+        run: sudo apt-get update && sudo apt-get install -y verilator git
+
+      - name: Checkout hw_ci
+        uses: actions/checkout@v4
+        with:
+          repository: ewoldege/hw_ci
+          ref: main
+          path: hw_ci
+
+      - name: Run hwci
+        run: |
+          python3 hw_ci/runner/hwci.py run \
+            --repo ${{ github.server_url }}/${{ github.repository }}.git \
+            --sha ${{ github.sha }} \
+            --plan plan.json \
+            --out out_dir
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hwci-artifacts
+          path: out_dir
