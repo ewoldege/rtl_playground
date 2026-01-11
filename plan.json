@@ -1,0 +1,37 @@
+{
+  "stages": [
+    {
+      "name": "lint",
+      "type": "lint",
+      "sources": [
+        "src/rtl/data_sampler.sv"
+      ],
+      "flags": [
+        "--Wno-WIDTHEXPAND",
+        "--Wno-WIDTHTRUNC",
+        "--Wno-TIMESCALEMOD",
+        "--Wno-UNOPTFLAT"
+      ]
+    },
+    {
+      "name": "build",
+      "type": "build",
+      "top": "tb_data_sampler",
+      "sources": [
+        "src/rtl/data_sampler.sv",
+        "src/tb/tb_data_sampler.sv"
+      ],
+      "flags": [
+        "--trace",
+        "--Wno-WIDTHEXPAND",
+        "--Wno-WIDTHTRUNC",
+        "--Wno-TIMESCALEMOD",
+        "--Wno-UNOPTFLAT"
+      ]
+    },
+    {
+      "name": "sim",
+      "type": "sim"
+    }
+  ]
+}
