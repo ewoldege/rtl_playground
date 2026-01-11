@@ -3,7 +3,7 @@ module adder_tree
 #(
     parameter int ELEM_W = 16,
     parameter int NUM_ELEM = 16,
-    parameter int SUM_W = ELEM_W + clog2(NUM_ELEM)
+    parameter int SUM_W = ELEM_W + $clog2(NUM_ELEM)
 )
 (
 

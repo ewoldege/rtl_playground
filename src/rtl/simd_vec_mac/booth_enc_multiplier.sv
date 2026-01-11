@@ -96,7 +96,7 @@ adder_tree
 u_adder_tree
     (
         .clk (clk),
-        .rst_n (rst),
+        .rst_n (rst_n),
         .valid_i(pp_valid),
         .adder_tree_in(pp),
         .sum_valid_o(product_valid_o),
