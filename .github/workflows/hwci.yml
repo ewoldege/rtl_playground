@@ -29,6 +29,22 @@ jobs:
             --plan plan.json \
             --out out_dir
 
+      - name: Publish job summary
+        if: always()
+        run: |
+          {
+            echo "## HWCI Results"
+            if [ -f out_dir/results.json ]; then
+              echo ""
+              echo "\`out_dir/results.json\`:"
+              echo ""
+              cat out_dir/results.json
+            else
+              echo ""
+              echo "No results.json found."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
