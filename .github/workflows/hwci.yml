@@ -51,30 +51,30 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-import json
-import os
-from datetime import datetime
+          import json
+          import os
+          from datetime import datetime
 
-def parse_ts(ts):
-    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+          def parse_ts(ts):
+              return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
-print("\n## Performance Metrics")
-start = os.environ.get("HWCI_START_TS")
-end = os.environ.get("HWCI_END_TS")
-if start and end:
-    total = int(end) - int(start)
-    print(f"- Total wall time (s): {total}")
-path = "out_dir/results.json"
-if os.path.exists(path):
-    with open(path, "r", encoding="ascii") as handle:
-        data = json.load(handle)
-    for stage in data.get("stages", []):
-        s = stage.get("started_at")
-        f = stage.get("finished_at")
-        if s and f:
-            dur = (parse_ts(f) - parse_ts(s)).total_seconds()
-            print(f"- {stage.get('name','stage')} duration (s): {int(dur)}")
-PY
+          print("\n## Performance Metrics")
+          start = os.environ.get("HWCI_START_TS")
+          end = os.environ.get("HWCI_END_TS")
+          if start and end:
+              total = int(end) - int(start)
+              print(f"- Total wall time (s): {total}")
+          path = "out_dir/results.json"
+          if os.path.exists(path):
+              with open(path, "r", encoding="ascii") as handle:
+                  data = json.load(handle)
+              for stage in data.get("stages", []):
+                  s = stage.get("started_at")
+                  f = stage.get("finished_at")
+                  if s and f:
+                      dur = (parse_ts(f) - parse_ts(s)).total_seconds()
+                      print(f"- {stage.get('name','stage')} duration (s): {int(dur)}")
+          PY
 
       - name: Upload artifacts
         if: always()
