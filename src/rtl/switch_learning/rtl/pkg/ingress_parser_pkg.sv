@@ -14,6 +14,9 @@
 
 package ingress_parser_pkg;
 
+  localparam int unsigned MAX_PKT_SIZE             = 8*1024;
+  localparam int unsigned MAX_PKT_SIZE_W           = $clog2(MAX_PKT_SIZE);
+
   //----------------------------------------------------------------------------
   // Parser-wide limits and architectural constants
   //----------------------------------------------------------------------------
@@ -432,5 +435,16 @@ package ingress_parser_pkg;
     logic                      malformed;       // Aggregated malformed-header indicator
 
   } parser_meta_t;
+
+  typedef enum logic[1:0]{
+    NORMAL_PKT = 2'b00,
+    MALFORMED_PKT = 2'b01,
+    FCS_ERR_PKT = 2'b10
+  } pkt_err_status_e;
+
+  typedef struct packed {
+    logic [MAX_PKT_SIZE_W-1:0] pkt_size;
+    pkt_err_status_e pkt_err; 
+  } per_pkt_metadata_t;
 
 endpackage : ingress_parser_pkg
