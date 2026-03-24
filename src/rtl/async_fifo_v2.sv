@@ -42,10 +42,11 @@ module async_fifo_v2
     endfunction;
     
     logic [FIFO_DEPTH-1:0][FIFO_WIDTH-1:0] mem;
-    logic [FIFO_DEPTH_W:0] wptr_next, wptr, wptr_g, rptr_next, rptr, rptr_g, wptr_gr1, wptr_gr2, rptr_gw1, rptr_gw2;
+    logic [FIFO_DEPTH_W:0] wptr_next, wptr_inc, wptr, wptr_g, rptr_next, rptr, rptr_g, wptr_gr1, wptr_gr2, rptr_gw1, rptr_gw2;
     logic [FIFO_DEPTH_W:0] rptr_w, wptr_r;
 
-    assign wptr_next = (wren && ~full) ? wptr + 1 : wptr;
+    assign wptr_next = (wren && ~full) ? wptr_inc : wptr;
+    assign wptr_inc = ((wptr[FIFO_DEPTH_W-1:0] == FIFO_DEPTH-1) ? {~wptr[FIFO_DEPTH_W], {FIFO_DEPTH_W{1'b0}}} : wptr + 1);
     
     // Write Process
     always_ff @(posedge wclk or negedge wrst_n) begin
@@ -61,7 +62,7 @@ module async_fifo_v2
         end
     end
 
-    assign rptr_next = (rden && ~empty) ? rptr + 1 : rptr;
+    assign rptr_next = (rden && ~empty) ? ((rptr[FIFO_DEPTH_W-1:0] == FIFO_DEPTH-1) ? {~rptr[FIFO_DEPTH_W], {FIFO_DEPTH_W{1'b0}}} : rptr + 1) : rptr;
 
     // Read Process
     always_ff @(posedge rclk or negedge rrst_n) begin
@@ -89,7 +90,7 @@ module async_fifo_v2
     end
 
     assign rptr_w = gray_to_standard(rptr_gw2);
-    assign full = (rptr_w[FIFO_DEPTH_W] ^ wptr_next[FIFO_DEPTH_W]) & (rptr_w[FIFO_DEPTH_W-1:0] == wptr_next[FIFO_DEPTH_W-1:0]);
+    assign full = (rptr_w[FIFO_DEPTH_W] ^ wptr_inc[FIFO_DEPTH_W]) & (rptr_w[FIFO_DEPTH_W-1:0] == wptr_inc[FIFO_DEPTH_W-1:0]);
 
     // Empty Logic
     always_ff @(posedge rclk or negedge rrst_n) begin
@@ -103,6 +104,6 @@ module async_fifo_v2
     end
 
     assign wptr_r = gray_to_standard(wptr_gr2);
-    assign empty = wptr_r[FIFO_DEPTH_W:0] == rptr_next[FIFO_DEPTH_W:0];
+    assign empty = wptr_r[FIFO_DEPTH_W:0] == rptr[FIFO_DEPTH_W:0];
 
 endmodule;

@@ -2,9 +2,10 @@
 
 module tb_async_fifo_v2;
 
-    localparam int FIFO_DEPTH = 32;
+    localparam int FIFO_DEPTH = 30;
     localparam int FIFO_WIDTH = 64;
     localparam int ADDR_W     = $clog2(FIFO_DEPTH);
+    localparam bit FIFO_DEPTH_IS_POW2 = (FIFO_DEPTH & (FIFO_DEPTH - 1)) == 0;
 
     logic                  wclk;
     logic                  wrst_n;
@@ -34,6 +35,11 @@ module tb_async_fifo_v2;
         .rdata  (rdata),
         .empty  (empty)
     );
+
+    initial begin
+        $dumpfile("wave.vcd");
+        $dumpvars(0, tb_async_fifo_v2);
+    end
 
     // ------------------------------------------------------------
     // Clocks
@@ -176,6 +182,12 @@ module tb_async_fifo_v2;
             else begin
                 $display("[%0t] FULL asserted after %0d write attempts", $time, i);
             end
+
+            if (exp_q.size() != FIFO_DEPTH - 1) begin
+                $error("[%0t] FULL asserted with wrong occupancy. expected=%0d actual=%0d",
+                       $time, FIFO_DEPTH - 1, exp_q.size());
+                errors++;
+            end
         end
     endtask
 
@@ -203,6 +215,11 @@ module tb_async_fifo_v2;
             else begin
                 $display("[%0t] EMPTY asserted after %0d read attempts", $time, i);
             end
+
+            if (exp_q.size() != 0) begin
+                $error("[%0t] EMPTY asserted with scoreboard occupancy=%0d", $time, exp_q.size());
+                errors++;
+            end
         end
     endtask
 
@@ -210,6 +227,14 @@ module tb_async_fifo_v2;
     // Test sequence
     // ------------------------------------------------------------
     initial begin
+        $display("\n================ CONFIG ================\n");
+        $display("FIFO_DEPTH=%0d FIFO_WIDTH=%0d", FIFO_DEPTH, FIFO_WIDTH);
+        if (FIFO_DEPTH_IS_POW2) begin
+            $error("[%0t] This testbench is intended to exercise a non-power-of-2 FIFO depth. FIFO_DEPTH=%0d",
+                   $time, FIFO_DEPTH);
+            errors++;
+        end
+
         reset_dut();
 
         $display("\n================ RESET CHECK ================\n");
@@ -226,11 +251,11 @@ module tb_async_fifo_v2;
 
         $display("\n================ BASIC WRITE/READ ================\n");
         write_one(64'h1111);
-        wait_wclk(3);
+        wait_wclk(4);
         expect_flag("empty_after_one_write_not_expected", empty, 1'b0);
 
         read_one();
-        wait_rclk(3);
+        wait_rclk(4);
         expect_flag("empty_after_single_drain", empty, 1'b1);
 
         $display("\n================ FULL STRESS ================\n");
@@ -277,6 +302,38 @@ module tb_async_fifo_v2;
             end
 
             expect_flag("empty_after_underflow_attempts", empty, 1'b1);
+        end
+
+        $display("\n================ NON-POWER-OF-2 WRAP CHECK ================\n");
+        // Force the internal pointers across the explicit FIFO_DEPTH-1 to 0 wrap boundary.
+        begin : NON_POWER_WRAP
+            int k;
+
+            $display("\n--- Prime near capacity ---");
+            for (k = 0; k < FIFO_DEPTH - 4; k++) begin
+                write_one(64'h9000_0000_0000_0000 + k);
+            end
+            wait_wclk(3);
+            expect_flag("empty_after_prime_not_expected", empty, 1'b0);
+            expect_flag("full_before_wrap_fill_not_expected", full, 1'b0);
+
+            $display("\n--- Drain a few entries ---");
+            for (k = 0; k < 6; k++) begin
+                read_one();
+            end
+            wait_rclk(3);
+            expect_flag("empty_mid_wrap_sequence_not_expected", empty, 1'b0);
+
+            $display("\n--- Refill across wrap boundary ---");
+            while (!full && exp_q.size() < FIFO_DEPTH - 1) begin
+                write_one(64'h9100_0000_0000_0000 + exp_q.size());
+                wait_wclk(1);
+            end
+            wait_wclk(4);
+            expect_flag("full_after_wrap_refill", full, 1'b1);
+
+            $display("\n--- Drain wrapped contents ---");
+            drain_until_empty();
         end
 
         $display("\n================ WRAPAROUND STRESS ================\n");
