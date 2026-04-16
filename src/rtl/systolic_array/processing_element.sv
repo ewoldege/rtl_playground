@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 module processing_element
 #(
     parameter int ACCUM_W = 32,
@@ -8,8 +9,8 @@ module processing_element
     input clk,
     input rst_n,
 
-    input logic weight_load_in;
-    input logic [WEIGHT_W-1:0] weight_in;
+    input logic weight_load_in,
+    input logic [WEIGHT_W-1:0] weight_in,
 
     // It is assumed that when the activation is valid,
     // the input accumulator is also valid
@@ -20,8 +21,7 @@ module processing_element
 
     output logic valid_out,
     output logic [ACTIVATION_W-1:0] activation_out,
-    output logic accum_valid_out,
-    output logic [ACCUM_W-1:0]      accum_out,
+    output logic [ACCUM_W-1:0]      accum_out
 );
 
 logic [WEIGHT_W-1:0] weight_val;
@@ -33,7 +33,7 @@ always_ff @(posedge clk or negedge rst_n) begin
     end else begin
         if(weight_load_in)
             weight_val <= weight_in;
-        valid_out <= valid_in
+        valid_out <= valid_in;
         if (valid_in) begin
             activation_out <= activation_in;
             // 8x8 multiply = 16 bit
@@ -41,7 +41,6 @@ always_ff @(posedge clk or negedge rst_n) begin
             // Fits easily inside a 32-bit bus
             accum_out <= activation_in*weight_val + accum_in;
         end
-
     end
 end
 
