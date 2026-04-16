@@ -23,27 +23,34 @@ module systolic_array_cell
     input logic [ARRAY_W-1:0][ACTIVATION_W-1:0] activation_in,
 
     output logic [ARRAY_W-1:0] valid_out,
-    output logic [ARRAY_W-1:0][ACCUM_W-1:0]      accum_out
+    output logic [ARRAY_W-1:0][ACCUM_W-1:0] accum_out
 );
 
-localparam int MAX_INPUT_DELAY_VAL = (ARRAY_W - 1) * PROCESSING_ELEMENT_LATENCY;
+localparam int INPUT_PIPE_DEPTH = (ARRAY_W > 1) ? (ARRAY_W - 1) * PROCESSING_ELEMENT_LATENCY : 1;
 
-logic [WEIGHT_W-1:0] weight_val;
-logic valid_systolic_array;
-logic [ARRAY_W-1:0][MAX_INPUT_DELAY_VAL-1:0][ACTIVATION_W-1:0] activation_pipeline;
-logic [MAX_INPUT_DELAY_VAL-1:0] valid_pipeline;
+logic [INPUT_PIPE_DEPTH-1:0][ARRAY_W-1:0][ACTIVATION_W-1:0] activation_pipeline;
+logic [INPUT_PIPE_DEPTH-1:0] valid_pipeline;
 
-logic [ACTIVATION_W-1:0] activation;
-logic [ACCUM_W-1:0] accum;
 logic [ARRAY_W-1:0][ARRAY_W-1:0][ACCUM_W-1:0] accum_out_array;
 logic [ARRAY_W-1:0][ARRAY_W-1:0][ACTIVATION_W-1:0] activation_out_array;
 logic [ARRAY_W-1:0][ARRAY_W-1:0] valid_out_array;
 
 for (genvar i = 0; i < ARRAY_W; i++) begin : row
     for (genvar j = 0; j < ARRAY_W; j++) begin : col
-        assign accum = (i == 0) ? '0 : accum_out_array[i-1][j];
-        assign valid_systolic_array = (j == 0) ? ((i == 0) ? valid_in : valid_pipeline[i*PROCESSING_ELEMENT_LATENCY-1]) : valid_out_array[i][j-1];
-        assign activation = (j == 0) ? ((i == 0) ? activation_in : activation_pipeline[i][i*PROCESSING_ELEMENT_LATENCY-1]) : activation_out_array[i][j-1];
+        logic pe_valid_in;
+        logic [ACTIVATION_W-1:0] pe_activation_in;
+        logic [ACCUM_W-1:0] pe_accum_in;
+
+        if (i == 0) begin : first_row
+            assign pe_valid_in = valid_in;
+            assign pe_activation_in = activation_in[i];
+            assign pe_accum_in = '0;
+        end else begin : later_rows
+            assign pe_valid_in = valid_pipeline[i*PROCESSING_ELEMENT_LATENCY-1];
+            assign pe_activation_in = activation_pipeline[i*PROCESSING_ELEMENT_LATENCY-1][i];
+            assign pe_accum_in = accum_out_array[i-1][j];
+        end
+
         processing_element #(
             .ACCUM_W(ACCUM_W),
             .WEIGHT_W(WEIGHT_W),
@@ -53,9 +60,9 @@ for (genvar i = 0; i < ARRAY_W; i++) begin : row
             .rst_n(rst_n),
             .weight_load_in(weight_load_in),
             .weight_in(weight_in[i][j]),
-            .valid_in(valid_pipeline[i*PROCESSING_ELEMENT_LATENCY-1]),
-            .activation_in(activation),
-            .accum_in(activation),
+            .valid_in(pe_valid_in),
+            .activation_in(pe_activation_in),
+            .accum_in(pe_accum_in),
             .valid_out(valid_out_array[i][j]),
             .activation_out(activation_out_array[i][j]),
             .accum_out(accum_out_array[i][j])
@@ -65,16 +72,15 @@ end
 
 always_ff @(posedge clk or negedge rst_n) begin
     if(~rst_n) begin
-        weight_val <= '0;
-        valid_out <= '0;
+        valid_pipeline <= '0;
+        activation_pipeline <= '0;
     end else begin
         valid_pipeline[0] <= valid_in;
-        valid_pipeline[MAX_INPUT_DELAY_VAL-1:1] <= valid_pipeline[MAX_INPUT_DELAY_VAL-2:0];
-        for(int i = 0; i < ARRAY_W; i++) begin
-            if(valid_in) begin
-                activation_pipeline[i][0] <= activation_in[i];
-            end
-            activation_pipeline[i][MAX_INPUT_DELAY_VAL-1:1] <= activation_pipeline[i][MAX_INPUT_DELAY_VAL-2:0];
+        activation_pipeline[0] <= activation_in;
+
+        for(int i = 1; i < INPUT_PIPE_DEPTH; i++) begin
+            valid_pipeline[i] <= valid_pipeline[i-1];
+            activation_pipeline[i] <= activation_pipeline[i-1];
         end
     end
 end
