@@ -15,7 +15,8 @@ module tb_systolic_array_cell;
     logic [ARRAY_W-1:0][ARRAY_W-1:0][WEIGHT_W-1:0] weight_in;
     logic valid_in;
     logic [ARRAY_W-1:0][ACTIVATION_W-1:0] activation_in;
-    logic [ARRAY_W-1:0] valid_out;
+    logic valid_out;
+    logic ready_in;
     logic [ARRAY_W-1:0][ACCUM_W-1:0] accum_out;
 
     logic [ARRAY_W-1:0][ARRAY_W-1:0][WEIGHT_W-1:0] weights;
@@ -36,6 +37,7 @@ module tb_systolic_array_cell;
         .valid_in(valid_in),
         .activation_in(activation_in),
         .valid_out(valid_out),
+        .ready_in(ready_in),
         .accum_out(accum_out)
     );
 
@@ -78,6 +80,7 @@ module tb_systolic_array_cell;
         weight_load_in = 1'b0;
         weight_in = '0;
         valid_in = 1'b0;
+        ready_in = 1'b1;
         activation_in = '0;
         checked_count = 0;
 
@@ -121,17 +124,11 @@ module tb_systolic_array_cell;
     initial begin
         forever begin
             @(posedge clk);
-            if (|valid_out) begin
+            if (valid_out && ready_in) begin
                 logic [ARRAY_W-1:0][ACCUM_W-1:0] expected;
 
                 if (golden_queue.size() == 0) begin
                     $error("Unexpected accum_out vector with an empty golden queue");
-                    $finish;
-                end
-
-                if (valid_out !== {ARRAY_W{1'b1}}) begin
-                    $error("Expected all valid_out bits high, got valid_out=0x%0h",
-                           valid_out);
                     $finish;
                 end
 

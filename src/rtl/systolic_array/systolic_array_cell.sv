@@ -22,11 +22,20 @@ module systolic_array_cell
     input logic valid_in,
     input logic [ARRAY_W-1:0][ACTIVATION_W-1:0] activation_in,
 
-    output logic [ARRAY_W-1:0] valid_out,
+    output logic valid_out,
+    input  logic ready_in,
     output logic [ARRAY_W-1:0][ACCUM_W-1:0] accum_out
 );
 
 localparam int INPUT_PIPE_DEPTH = (ARRAY_W > 1) ? (ARRAY_W - 1) * PROCESSING_ELEMENT_LATENCY : 1;
+
+// Technically, we are draining the output FIFOs after all inputs hvae been processed and written into the FIFOs
+// this i a function of (ARRAY_W - 1) * PROCESSING_ELEMENT_LATENCY. But thats the time the last wren hits the rightmost FIFO
+// we are using the empty signal to determine when we can read, so thats an extra 2 cycles of latency
+// There are other cycles of latency we may be missing, so to cover those we are adding some fixed margin for now.
+localparam int FIFO_DEPTH        = 2*INPUT_PIPE_DEPTH + 16;
+localparam int FIFO_WIDTH        = ACCUM_W;
+localparam int FIFO_AFULL_THRESH = FIFO_DEPTH - (INPUT_PIPE_DEPTH + 8);
 
 logic [INPUT_PIPE_DEPTH-1:0][ARRAY_W-1:0][ACTIVATION_W-1:0] activation_pipeline;
 logic [INPUT_PIPE_DEPTH-1:0] valid_pipeline;
@@ -34,6 +43,10 @@ logic [INPUT_PIPE_DEPTH-1:0] valid_pipeline;
 logic [ARRAY_W-1:0][ARRAY_W-1:0][ACCUM_W-1:0] accum_out_array;
 logic [ARRAY_W-1:0][ARRAY_W-1:0][ACTIVATION_W-1:0] activation_out_array;
 logic [ARRAY_W-1:0][ARRAY_W-1:0] valid_out_array;
+
+logic [ARRAY_W-1:0] accum_stage_buffer_empty;
+logic accum_stage_buffer_rden;
+logic [ARRAY_W-1:0][ACCUM_W-1:0] accum_stage_buffer_rdata;
 
 for (genvar i = 0; i < ARRAY_W; i++) begin : row
     for (genvar j = 0; j < ARRAY_W; j++) begin : col
@@ -85,7 +98,28 @@ always_ff @(posedge clk or negedge rst_n) begin
     end
 end
 
-assign valid_out = valid_out_array[ARRAY_W-1][ARRAY_W-1:0];
-assign accum_out = accum_out_array[ARRAY_W-1][ARRAY_W-1:0];
+// TODO: Add backpressure capabilities to this design by connecting the afull signals
+// threshold has already been computed above
+for(genvar j = 0; j < ARRAY_W; j++) begin
+    fifo_fwft_sync #(
+        .DATA_W(FIFO_WIDTH),
+        .DEPTH(FIFO_DEPTH)
+    )
+    accum_stage_buffer (
+        .clk(clk),
+        .rst_n(rst_n),
+        .wr_en(valid_out_array[ARRAY_W-1][j]),
+        .wr_data(accum_out_array[ARRAY_W-1][j]),
+        .full(),
+        .rd_en(accum_stage_buffer_rden),
+        .rd_data(accum_stage_buffer_rdata[j]),
+        .empty(accum_stage_buffer_empty[j])
+    );
+end
+
+// Read only when all buffers are nonempty and downstream is ready
+assign accum_stage_buffer_rden = &(~accum_stage_buffer_empty) & ready_in;
+assign valid_out = &(~accum_stage_buffer_empty);
+assign accum_out = accum_stage_buffer_rdata;
 
 endmodule
