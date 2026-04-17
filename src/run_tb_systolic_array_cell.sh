@@ -4,9 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-verilator --binary --trace --timing \
+verilator --binary --trace --timing -Wno-TIMESCALEMOD -Wno-WIDTHEXPAND \
     rtl/systolic_array/systolic_array_pkg.sv \
     rtl/systolic_array/processing_element.sv \
+    rtl/fifo_fwft_sync.sv \
     rtl/systolic_array/systolic_array_cell.sv \
     tb/tb_systolic_array_cell.sv \
     --top tb_systolic_array_cell
