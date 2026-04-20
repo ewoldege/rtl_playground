@@ -11,11 +11,14 @@ module tb_systolic_array_cell;
 
     logic clk;
     logic rst_n;
+    logic weight_clr_in;
     logic weight_load_in;
-    logic [ARRAY_W-1:0][ARRAY_W-1:0][WEIGHT_W-1:0] weight_in;
+    logic [ARRAY_W-1:0][WEIGHT_W-1:0] weight_in;
     logic valid_in;
+    logic last_in;
     logic [ARRAY_W-1:0][ACTIVATION_W-1:0] activation_in;
     logic valid_out;
+    logic last_out;
     logic ready_in;
     logic [ARRAY_W-1:0][ACCUM_W-1:0] accum_out;
 
@@ -32,11 +35,14 @@ module tb_systolic_array_cell;
     ) dut (
         .clk(clk),
         .rst_n(rst_n),
+        .weight_clr_in(weight_clr_in),
         .weight_load_in(weight_load_in),
         .weight_in(weight_in),
         .valid_in(valid_in),
+        .last_in(last_in),
         .activation_in(activation_in),
         .valid_out(valid_out),
+        .last_out(last_out),
         .ready_in(ready_in),
         .accum_out(accum_out)
     );
@@ -77,9 +83,11 @@ module tb_systolic_array_cell;
 
     initial begin
         rst_n = 1'b0;
+        weight_clr_in = 1'b0;
         weight_load_in = 1'b0;
         weight_in = '0;
         valid_in = 1'b0;
+        last_in = 1'b0;
         ready_in = 1'b1;
         activation_in = '0;
         checked_count = 0;
@@ -99,18 +107,29 @@ module tb_systolic_array_cell;
 
         @(posedge clk);
         #1;
-        weight_in = weights;
-        weight_load_in = 1'b1;
+        weight_clr_in = 1'b1;
 
         @(posedge clk);
         #1;
-        weight_load_in = 1'b0;
-        weight_in = '0;
+        weight_clr_in = 1'b0;
+
+        for (int row = 0; row < ARRAY_W; row++) begin
+            @(posedge clk);
+            #1;
+            weight_in = weights[row];
+            weight_load_in = 1'b1;
+
+            @(posedge clk);
+            #1;
+            weight_load_in = 1'b0;
+            weight_in = '0;
+        end
 
         for (int row = 0; row < NUM_ROWS; row++) begin
             @(posedge clk);
             #1;
             valid_in = 1'b1;
+            last_in = (row == NUM_ROWS - 1);
             activation_in = activations[row];
             push_expected_row(row);
         end
@@ -118,6 +137,7 @@ module tb_systolic_array_cell;
         @(posedge clk);
         #1;
         valid_in = 1'b0;
+        last_in = 1'b0;
         activation_in = '0;
     end
 
@@ -133,6 +153,12 @@ module tb_systolic_array_cell;
                 end
 
                 expected = golden_queue.pop_front();
+                if (last_out !== (checked_count == NUM_ROWS - 1)) begin
+                    $error("last_out mismatch at row %0d: expected %0b, got %0b",
+                           checked_count, (checked_count == NUM_ROWS - 1), last_out);
+                    $finish;
+                end
+
                 for (int col = 0; col < ARRAY_W; col++) begin
                     if (accum_out[col] !== expected[col]) begin
                         $error("Mismatch at row %0d col %0d: expected %0d, got %0d",
