@@ -66,6 +66,11 @@ logic [MAT_W_W-1:0] weight_load_cnt;
 logic [MAT_W_W-1:0] service_cnt;
 logic [MAX_TILES_W-1:0] tile_end_cnt;
 
+logic sys_valid;
+logic sys_last;
+logic [ARRAY_W-1:0][ACCUM_W-1:0] sys_accum;
+logic [MAT_W_W-1:0] inc_addr
+
 always_comb begin
     weight_rd_en_out = 1'b0;
     weight_clr = 1'b0;
@@ -124,6 +129,7 @@ always_ff @(posedge clk or negedge rst_n) begin
         act_rd_en_out <= '0;
         tile_end_cnt <= '0;
         instr <= '0;
+        inc_addr <= '0;
     end else begin
         curr_state <= next_state;
         weight_val <= weight_rd_en_out;
@@ -172,6 +178,11 @@ always_ff @(posedge clk or negedge rst_n) begin
         else if (tile_end)
             tile_end_cnt <= tile_end_cnt + 1;
 
+        if(sys_last)
+            inc_addr <= '0;
+        else if(sys_valid)
+            inc_addr <= inc_addr + 1;
+
 
     end
 end
@@ -188,7 +199,7 @@ systolic_array_cell #(
     .WEIGHT_W(WEIGHT_W),
     .ACTIVATION_W(ACTIVATION_W),
     .ARRAY_W(ARRAY_W)
-) dut (
+) systolic_array (
     .clk(clk),
     .rst_n(rst_n),
     .weight_clr_in(weight_clr),
@@ -197,28 +208,28 @@ systolic_array_cell #(
     .valid_in(act_valid),
     .activation_in(activation),
     .valid_out(sys_valid),
+    .last_out(sys_last)
     .ready_in(ready),
-    .accum_out(accum)
+    .accum_out(sys_accum)
 );
 
 assign ready <= 1'b1;
 
-// Banked Accumulator
-for(genvar j = 0; j < ARRAY_W; j++) begin
-    always_ff @(posedge clk or negedge rst_n) begin
-        if(~rst_n) begin
-            systolic_array_banked_accum[j] <= '0;
-        end else begin
-            // When the systolic array has an element, add it to the running accumulator
-            if(sys_valid)
-                systolic_array_banked_accum[j] <= systolic_array_banked_accum[j] + accum[j];
-            // When the top state machine indicates that we've gone through all tiles of a column,
-            // we've finished accumulating all partial sums of a given column. We are done.
-            if(col_valid)
-                systolic_array_banked_accum[j] <= '0;
-        end
-    end
-end
+// Did not hook up drain interface yet
+banked_accum #(
+    .ACCUM_W(ACCUM_W),
+    .ARRAY_W(ARRAY_W),
+    .MAT_W_W(MAT_W_W)
+) u_banked_accum (
+    .clk(clk),
+    .rst_n(rst_n),
+    .inc_valid(sys_valid),
+    .inc_addr(inc_addr),
+    .inc_data(sys_accum),
+    .rd_en(1'b0),/*OPEN*/
+    .rd_addr(/*OPEN*/),
+    .rd_data(/*OPEN*/)
+);
 
 // Read only when all buffers are nonempty and downstream is ready
 assign accum_stage_buffer_rden = &(~accum_stage_buffer_empty) & ready_in;
