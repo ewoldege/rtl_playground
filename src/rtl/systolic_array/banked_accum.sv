@@ -11,6 +11,7 @@ module banked_accum
 (
     input clk,
     input rst_n,
+    input clr,
 
     input inc_valid,
     input logic [MAT_W_W-1:0] inc_addr,
@@ -23,7 +24,7 @@ module banked_accum
     // drain port
     input rd_en,
     input  logic [MAT_W_W-1:0] rd_addr,
-    output logic [2*ACCUM_W-1:0] rd_data
+    output logic [ARRAY_W-1:0][ACCUM_W-1:0] rd_data
 );
 
 logic[ARRAY_W-1:0][ACCUM_W-1:0] inc_data_q;
@@ -32,6 +33,7 @@ logic[ARRAY_W-1:0][ACCUM_W-1:0] banked_accum;
 logic[MAT_W_W-1:0] sram_rd_addr;
 logic[MAT_W_W-1:0] inc_addr_q;
 logic[MAT_W_W-1:0] inc_addr_2q;
+logic banked_accum_valid;
 logic sram_rvalid;
 logic sram_is_valid;
 
@@ -61,17 +63,21 @@ always_ff @(posedge clk or negedge rst_n) begin
         banked_accum_valid <= 1'b0;
         sram_is_valid <= 1'b0;
     end else begin
-        inc_addr_q <= inc_addr;
-        inc_addr_2q <= inc_addr_q;
-        inc_data_q <= inc_data;
-        banked_accum_valid <= sram_rvalid;
-        
-        // Indicates when a full pass through the SRAM has been completed
-        // Assumes sequential access nature through SRAM
-        // Full pass through means that we have some level of history in SRAM for the accumulation
-        // If this isnt enabled, then just write the current increment value as the history in SRAM
-        if(inc_valid && (inc_addr == MAT_W-1))
-            sram_is_valid <= 1'b1;
+        if(clr) begin
+            sram_is_valid <= 1'b0;
+        end else begin
+            inc_addr_q <= inc_addr;
+            inc_addr_2q <= inc_addr_q;
+            inc_data_q <= inc_data;
+            banked_accum_valid <= sram_rvalid;
+            
+            // Indicates when a full pass through the SRAM has been completed
+            // Assumes sequential access nature through SRAM
+            // Full pass through means that we have some level of history in SRAM for the accumulation
+            // If this isnt enabled, then just write the current increment value as the history in SRAM
+            if(inc_valid && (inc_addr == MAT_W-1))
+                sram_is_valid <= 1'b1;
+        end
     end
 end
 
