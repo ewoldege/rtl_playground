@@ -55,10 +55,6 @@ module sram_cell #(
         if (!rst_n) begin
             rd_data  <= '0;
             rd_valid <= 1'b0;
-            // TODO: Remove memory reset once callers no longer depend on cleared SRAM contents.
-            for (int i = 0; i < DEPTH; i++) begin
-                mem[i] <= '0;
-            end
         end else begin
             rd_valid <= en && rd_en;
 
