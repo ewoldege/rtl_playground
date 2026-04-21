@@ -5,7 +5,8 @@ module banked_accum
 #(
     parameter int ACCUM_W = 32,
     parameter int ARRAY_W = 4,
-    parameter int MAT_W_W = 4
+    parameter int MAT_W = 4,
+    parameter int MAT_W_W = $clog2(MAT_W)
 )
 (
     input clk,

@@ -56,7 +56,7 @@ typedef enum {IDLE, FETCH_VEC, ACT_FETCH_VEC, WEIGHT_LOAD, SERVICE} state_t;
 state_t curr_state, next_state;
 instr_t instr;
 logic [ARRAY_W_W-1:0] fetch_en_cnt;
-logic weight_clr;
+logic clear_array_stats;
 logic weight_load;
 logic col_end;
 logic tile_end;
@@ -71,16 +71,19 @@ logic sys_last;
 logic [ARRAY_W-1:0][ACCUM_W-1:0] sys_accum;
 logic [MAT_W_W-1:0] inc_addr
 
+logic drain_active;
+logic [MAT_W_W-1:0] drain_addr;
+
 always_comb begin
     weight_rd_en_out = 1'b0;
-    weight_clr = 1'b0;
+    clear_array_stats = 1'b0;
     act_rd_en_out = 1'b0;
     col_end = 1'b0;
     weight_load = 1'b0;
     next_state = curr_state;
     case(curr_state)
         IDLE: begin
-            weight_clr = 1'b1;
+            clear_array_stats = 1'b1;
             if(inst_load) begin
                next_state = FETCH_VEC 
             end
@@ -111,7 +114,12 @@ always_comb begin
                 // If we have not, then we need to just fetch new activations for the next tile in the columnn.
                 if(tile_end_cnt = instr.num_tiles-1) begin
                     col_end = 1'b1;
-                    next_state <= FETCH_VEC;
+                    // If we've reached the maximum number of horizontal tiles - we are finished.
+                    if(col_end_cnt = instr.num_tiles-1) begin
+                        next_state = IDLE;
+                    end else begin
+                        next_state <= FETCH_VEC;
+                    end
                 end else
                     next_state <= ACT_ONLY_FETCH_VEC;                
             end
@@ -130,6 +138,8 @@ always_ff @(posedge clk or negedge rst_n) begin
         tile_end_cnt <= '0;
         instr <= '0;
         inc_addr <= '0;
+        drain_active <= 1'b0;
+        drain_addr <= '0;
     end else begin
         curr_state <= next_state;
         weight_val <= weight_rd_en_out;
@@ -171,17 +181,39 @@ always_ff @(posedge clk or negedge rst_n) begin
         end else begin
             service_cnt <= '0;
         end
-        if (act_rd_en_out)
+        if (clear_array_stats)
+            act_rd_addr_out <= '0;
+        else if (act_rd_en_out)
             act_rd_addr_out <= act_rd_addr_out + 1;
-        if (col_end)
+        if (clear_array_stats || col_end)
             tile_end_cnt <= '0;
         else if (tile_end)
             tile_end_cnt <= tile_end_cnt + 1;
 
-        if(sys_last)
+        if(clear_array_stats || sys_last)
             inc_addr <= '0;
         else if(sys_valid)
             inc_addr <= inc_addr + 1;
+
+        if(clear_array_stats)
+            col_end_cnt <= '0;
+        else if(col_end)
+            col_end_cnt <= col_end_cnt + 1;
+
+        // Drain sequence
+        // When we reach the end of a tile column, we drain the results of the banked accumulators
+        
+        // TODO CHECK TO SEE IF WE STILL NEED TO RESET THE BANKED ACCUMULATOR AFTER COL_END
+        // IF WE DO THEN WE MAY NEED TO ADJUST THE TIMING OF THIS
+        if(col_end) begin
+            drain_active <= 1'b1;
+            drain_addr <= '0;
+        end else if(drain_active && (drain_addr == MAT_W-1)) begin
+            drain_addr <= '0;
+            drain_active <= 1'b0;
+        end else if(drain_active) begin
+            drain_addr <= drain_addr + 1;
+        end
 
 
     end
@@ -202,7 +234,7 @@ systolic_array_cell #(
 ) systolic_array (
     .clk(clk),
     .rst_n(rst_n),
-    .weight_clr_in(weight_clr),
+    .weight_clr_in(clear_array_stats),
     .weight_load_in(weight_load),
     .weight_in(weight),
     .valid_in(act_valid),
@@ -226,9 +258,9 @@ banked_accum #(
     .inc_valid(sys_valid),
     .inc_addr(inc_addr),
     .inc_data(sys_accum),
-    .rd_en(1'b0),/*OPEN*/
-    .rd_addr(/*OPEN*/),
-    .rd_data(/*OPEN*/)
+    .rd_en(drain_active),
+    .rd_addr(drain_addr),
+    .rd_data(accum_out)
 );
 
 // Read only when all buffers are nonempty and downstream is ready
