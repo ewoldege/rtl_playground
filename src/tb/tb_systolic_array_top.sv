@@ -72,7 +72,7 @@ module tb_systolic_array_top;
     end
 
     initial begin
-        $dumpfile("wave_systolic_array_top.vcd");
+        $dumpfile("wave_systolic_array_top.fst");
         $dumpvars(0, tb_systolic_array_top);
     end
 
@@ -100,13 +100,13 @@ module tb_systolic_array_top;
     endtask
 
     task automatic load_memory_images;
-        // Each SRAM word contains one full MAT_W-wide matrix row. The DUT selects
+        // Each SRAM word contains one full MAT_W-high matrix column. The DUT selects
         // addresses through act_rd_addr_out/weight_rd_addr_out and sees the data
         // one cycle later through the read-response model below.
         for (int addr = 0; addr < MAT_W; addr++) begin
             for (int elem = 0; elem < MAT_W; elem++) begin
-                act_mem[addr][elem] = matrix_a[addr][elem];
-                weight_mem[addr][elem] = matrix_b[addr][elem];
+                act_mem[addr][MAT_W-1-elem] = matrix_a[elem][addr];
+                weight_mem[addr][MAT_W-1-elem] = matrix_b[elem][addr];
             end
         end
     endtask

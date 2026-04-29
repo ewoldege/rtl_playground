@@ -81,12 +81,12 @@ for (genvar i = 0; i < ARRAY_W; i++) begin : row
         if (i == 0) begin : first_row
             assign pe_valid_in = valid_in;
             assign pe_last_in = last_in;
-            assign pe_activation_in = activation_in[i];
+            assign pe_activation_in = activation_in[ARRAY_W-1-i];
             assign pe_accum_in = '0;
         end else begin : later_rows
             assign pe_valid_in = valid_pipeline[i*PROCESSING_ELEMENT_LATENCY-1];
             assign pe_last_in = last_pipeline[i*PROCESSING_ELEMENT_LATENCY-1];
-            assign pe_activation_in = activation_pipeline[i*PROCESSING_ELEMENT_LATENCY-1][i];
+            assign pe_activation_in = activation_pipeline[i*PROCESSING_ELEMENT_LATENCY-1][ARRAY_W-1-i];
             assign pe_accum_in = accum_out_array[i-1][j];
         end
 
@@ -98,7 +98,7 @@ for (genvar i = 0; i < ARRAY_W; i++) begin : row
             .clk(clk),
             .rst_n(rst_n),
             .weight_load_in(weight_load[i]),
-            .weight_in(weight_in[j]),
+            .weight_in(weight_in[ARRAY_W-1-j]),
             .valid_in(pe_valid_in),
             .last_in(pe_last_in),
             .activation_in(pe_activation_in),

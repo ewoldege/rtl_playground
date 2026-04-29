@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-verilator --binary --trace --timing -Wno-TIMESCALEMOD -Wno-WIDTHEXPAND \
+verilator --binary --trace-fst --timing -Wno-TIMESCALEMOD -Wno-WIDTHEXPAND \
     rtl/systolic_array/systolic_array_pkg.sv \
     rtl/sram_cell.sv \
     rtl/fifo_fwft_sync.sv \
@@ -17,4 +17,4 @@ verilator --binary --trace --timing -Wno-TIMESCALEMOD -Wno-WIDTHEXPAND \
 
 ./obj_dir/Vtb_systolic_array_top "$@"
 
-echo "VCD written to $(pwd)/wave_systolic_array_top.vcd"
+echo "FST written to $(pwd)/wave_systolic_array_top.fst"
