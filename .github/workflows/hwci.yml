@@ -26,9 +26,13 @@ jobs:
       - name: Run hwci
         run: |
           start_ts=$(date +%s)
+          hwci_sha="${{ github.sha }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            hwci_sha="${{ github.event.pull_request.head.sha }}"
+          fi
           python3 hw_ci/runner/hwci.py run \
             --repo ${{ github.server_url }}/${{ github.repository }}.git \
-            --sha ${{ github.sha }} \
+            --sha "$hwci_sha" \
             --plan plan.json \
             --out out_dir
           end_ts=$(date +%s)
