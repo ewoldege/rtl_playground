@@ -49,15 +49,17 @@ always_ff @(posedge clk or negedge rst_n) begin
             last_sreg[i]  <= last_sreg[i-1];
         end
 
-        activation_sreg[0] <= activation_in;
-        for (int i = 1; i < PROCESSING_ELEMENT_LATENCY; i++) begin
-            activation_sreg[i] <= activation_sreg[i-1];
+        if (valid_in) begin
+            activation_sreg[0] <= activation_in;
+            // 8x8 multiply = 16 bit; the add still fits inside a 32-bit bus.
+            accum_sreg[0] <= activation_in*weight_val + accum_in;
         end
 
-        // 8x8 multiply = 16 bit; the add still fits inside a 32-bit bus.
-        accum_sreg[0] <= activation_in*weight_val + accum_in;
         for (int i = 1; i < PROCESSING_ELEMENT_LATENCY; i++) begin
-            accum_sreg[i] <= accum_sreg[i-1];
+            if (valid_sreg[i-1]) begin
+                activation_sreg[i] <= activation_sreg[i-1];
+                accum_sreg[i] <= accum_sreg[i-1];
+            end
         end
     end
 end
