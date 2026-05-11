@@ -1,4 +1,8 @@
 my-env/*
+.codex/
+QuestaSetup-*.run
+*.vcd
+*.fst
 src/obj_dir/*
 verilog-axi-master/*
 obj_dir/verilated_threads.d
