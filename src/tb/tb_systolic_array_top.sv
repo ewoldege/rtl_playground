@@ -80,14 +80,20 @@ module tb_systolic_array_top;
         input int unsigned row,
         input int unsigned col
     );
-        return ACTIVATION_W'(((row + 1) * 3 + (col + 2)) % 8);
+        int signed value;
+
+        value = int'(((row + 1) * 5 + (col + 3) * 2) % 13) - 6;
+        return ACTIVATION_W'(value);
     endfunction
 
     function automatic logic [WEIGHT_W-1:0] make_weight(
         input int unsigned row,
         input int unsigned col
     );
-        return WEIGHT_W'(((row + 2) + (col * 5)) % 9);
+        int signed value;
+
+        value = int'(((row + 2) * 3 + (col * 5)) % 11) - 5;
+        return WEIGHT_W'(value);
     endfunction
 
     task automatic init_matrices;
@@ -114,11 +120,18 @@ module tb_systolic_array_top;
     task automatic build_golden_matrix;
         for (int row = 0; row < MAT_W; row++) begin
             for (int col = 0; col < MAT_W; col++) begin
-                golden_c[row][col] = '0;
+                logic signed [ACCUM_W-1:0] sum;
+
+                sum = '0;
                 for (int k = 0; k < MAT_W; k++) begin
-                    golden_c[row][col] += ACCUM_W'(matrix_a[row][k]) *
-                                          ACCUM_W'(matrix_b[k][col]);
+                    logic signed [ACTIVATION_W-1:0] activation;
+                    logic signed [WEIGHT_W-1:0] weight;
+
+                    activation = matrix_a[row][k];
+                    weight = matrix_b[k][col];
+                    sum += ACCUM_W'(activation) * ACCUM_W'(weight);
                 end
+                golden_c[row][col] = sum;
             end
         end
     endtask
@@ -229,14 +242,15 @@ module tb_systolic_array_top;
                     if (accum_out[lane] !== expected[lane]) begin
                         $error("Mismatch word=%0d row=%0d col=%0d: expected %0d, got %0d",
                                checked_count, row_idx, col_base + lane,
-                               expected[lane], accum_out[lane]);
+                               $signed(expected[lane]), $signed(accum_out[lane]));
                         error_count++;
                     end
                 end
 
                 $display("CHECK word=%0d row=%0d cols=%0d:%0d accum={%0d, %0d, %0d, %0d}",
                          checked_count, row_idx, col_base, col_base + ARRAY_W - 1,
-                         accum_out[0], accum_out[1], accum_out[2], accum_out[3]);
+                         $signed(accum_out[0]), $signed(accum_out[1]),
+                         $signed(accum_out[2]), $signed(accum_out[3]));
                 checked_count++;
 
                 if (checked_count == EXPECTED_WORDS) begin
