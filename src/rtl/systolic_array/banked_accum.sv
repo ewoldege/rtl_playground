@@ -30,6 +30,8 @@ module banked_accum
 logic[ARRAY_W-1:0][ACCUM_W-1:0] inc_data_q;
 logic[ARRAY_W-1:0][ACCUM_W-1:0] sram_rdata;
 logic[ARRAY_W-1:0][ACCUM_W-1:0] banked_accum;
+logic[ARRAY_W-1:0][ACCUM_W-1:0] sum;
+logic[ARRAY_W-1:0] overflow;
 logic[MAT_W_W-1:0] sram_rd_addr;
 logic[MAT_W_W-1:0] inc_addr_q;
 logic[MAT_W_W-1:0] inc_addr_2q;
@@ -99,13 +101,18 @@ end
 
 // Banked Accumulator
 for(genvar j = 0; j < ARRAY_W; j++) begin
+    assign sum[j] = $signed(sram_rdata[j]) + $signed(inc_data_q[j]);
+    assign overflow[j] = (sram_rdata[j][ACCUM_W-1] == inc_data_q[j][ACCUM_W-1]) && (sum[j][ACCUM_W-1] ^ sram_rdata[j][ACCUM_W-1]);
     always_ff @(posedge clk or negedge rst_n) begin
         if(~rst_n) begin
         end else begin
             // When the systolic array has an element, add it to the running accumulator
-            if(sram_rvalid)
-                banked_accum[j] <= sram_rdata[j] + inc_data_q[j];
-            else
+            if(sram_rvalid) begin
+                if(overflow[j])
+                    banked_accum[j] <= {sram_rdata[j][ACCUM_W-1], {(ACCUM_W-1){~sram_rdata[j][ACCUM_W-1]}}};
+                else
+                    banked_accum[j] <= sum[j];
+            end else
                 banked_accum[j] <= inc_data_q[j];
         end
     end
