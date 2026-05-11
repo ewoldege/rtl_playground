@@ -46,7 +46,6 @@ localparam int FIFO_WIDTH        = ACCUM_W;
 localparam int FIFO_AFULL_THRESH = FIFO_DEPTH - (INPUT_PIPE_DEPTH + 8);
 localparam int ACCUM_FLUSH_CYCLES = 3;
 localparam int ACCUM_FLUSH_W = (ACCUM_FLUSH_CYCLES > 1) ? $clog2(ACCUM_FLUSH_CYCLES) : 1;
-localparam int SYS_OUTPUT_CNT_W = MAX_TILES_W + MAT_W_W + 1;
 
 logic [INPUT_PIPE_DEPTH-1:0][ARRAY_W-1:0][ACTIVATION_W-1:0] activation_pipeline;
 logic [INPUT_PIPE_DEPTH-1:0] valid_pipeline;
@@ -89,8 +88,6 @@ logic drain_active;
 logic drain_issue;
 logic drain_issue_q;
 logic [ACCUM_FLUSH_W-1:0] accum_flush_cnt;
-logic [SYS_OUTPUT_CNT_W-1:0] sys_output_cnt;
-logic [SYS_OUTPUT_CNT_W-1:0] expected_sys_outputs;
 logic [MAT_W_W-1:0] drain_addr;
 logic [ARRAY_W-1:0][ACCUM_W-1:0] banked_accum_rd_data;
 
@@ -138,18 +135,16 @@ always_comb begin
             // Passed all activations for a given tile
             if(service_cnt == MAT_W-1) begin 
                 tile_end = 1'b1;
-                // If we've reached the last tile in the column, we need to notify the accumulators
-                // to latch the final values and fetch new weights AND activations from the external SRAM
-                // If we have not, then we need to just fetch new activations for the next tile in the columnn.
-                if(tile_end_cnt == instr.num_tiles-1) begin
-                    next_state = WAIT_SYS_LAST;
-                end else
-                    next_state = ACT_FETCH_VEC;                
+                next_state = WAIT_SYS_LAST;
             end
         end
         WAIT_SYS_LAST: begin
-            if(sys_valid && (sys_output_cnt == expected_sys_outputs - 1'b1))
-                next_state = WAIT_ACCUM;
+            if(sys_valid && sys_last) begin
+                if(tile_end_cnt == instr.num_tiles)
+                    next_state = WAIT_ACCUM;
+                else
+                    next_state = ACT_FETCH_VEC;
+            end
         end
         WAIT_ACCUM: begin
             if(accum_flush_cnt == ACCUM_FLUSH_CYCLES-1)
@@ -183,7 +178,6 @@ always_ff @(posedge clk or negedge rst_n) begin
         inc_addr <= '0;
         drain_addr <= '0;
         accum_flush_cnt <= '0;
-        sys_output_cnt <= '0;
         drain_issue_q <= 1'b0;
         valid_out <= 1'b0;
         accum_out <= '0;
@@ -260,11 +254,6 @@ always_ff @(posedge clk or negedge rst_n) begin
         else if(sys_valid)
             inc_addr <= inc_addr + 1;
 
-        if(clear_array_stats || (drain_issue && (drain_addr == MAT_W-1)))
-            sys_output_cnt <= '0;
-        else if(sys_valid)
-            sys_output_cnt <= sys_output_cnt + 1;
-
         if(curr_state == WAIT_ACCUM)
             accum_flush_cnt <= accum_flush_cnt + 1;
         else
@@ -300,7 +289,6 @@ always_comb begin
 end
 
 assign drain_issue = drain_active && (!valid_out || ready_in);
-assign expected_sys_outputs = SYS_OUTPUT_CNT_W'(instr.num_tiles) * SYS_OUTPUT_CNT_W'(MAT_W);
 
 systolic_array_cell #(
     .ACCUM_W(ACCUM_W),

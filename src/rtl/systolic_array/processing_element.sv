@@ -27,25 +27,44 @@ module processing_element
 );
 
 logic [WEIGHT_W-1:0] weight_val;
+logic [PROCESSING_ELEMENT_LATENCY-1:0][ACTIVATION_W-1:0] activation_sreg;
+logic [PROCESSING_ELEMENT_LATENCY-1:0][ACCUM_W-1:0] accum_sreg;
+logic [PROCESSING_ELEMENT_LATENCY-1:0] valid_sreg;
+logic [PROCESSING_ELEMENT_LATENCY-1:0] last_sreg;
 
 always_ff @(posedge clk or negedge rst_n) begin
     if(~rst_n) begin
         weight_val <= '0;
-        valid_out <= '0;
-        last_out <= '0;
+        valid_sreg <= '0;
+        last_sreg <= '0;
+        accum_sreg <= '0;
+        activation_sreg <= '0;
     end else begin
         if(weight_load_in)
             weight_val <= weight_in;
-        valid_out <= valid_in;
-        last_out <= last_in;
-        if (valid_in) begin
-            activation_out <= activation_in;
-            // 8x8 multiply = 16 bit
-            // 16+8 multiply = 17 bit
-            // Fits easily inside a 32-bit bus
-            accum_out <= activation_in*weight_val + accum_in;
+        valid_sreg[0] <= valid_in;
+        last_sreg[0] <= last_in && valid_in;
+        for (int i = 1; i < PROCESSING_ELEMENT_LATENCY; i++) begin
+            valid_sreg[i] <= valid_sreg[i-1];
+            last_sreg[i]  <= last_sreg[i-1];
+        end
+
+        activation_sreg[0] <= activation_in;
+        for (int i = 1; i < PROCESSING_ELEMENT_LATENCY; i++) begin
+            activation_sreg[i] <= activation_sreg[i-1];
+        end
+
+        // 8x8 multiply = 16 bit; the add still fits inside a 32-bit bus.
+        accum_sreg[0] <= activation_in*weight_val + accum_in;
+        for (int i = 1; i < PROCESSING_ELEMENT_LATENCY; i++) begin
+            accum_sreg[i] <= accum_sreg[i-1];
         end
     end
 end
+
+assign activation_out = activation_sreg[PROCESSING_ELEMENT_LATENCY-1];
+assign accum_out = accum_sreg[PROCESSING_ELEMENT_LATENCY-1];
+assign valid_out = valid_sreg[PROCESSING_ELEMENT_LATENCY-1];
+assign last_out  = last_sreg[PROCESSING_ELEMENT_LATENCY-1];
 
 endmodule

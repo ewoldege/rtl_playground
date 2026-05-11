@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 package systolic_array_pkg;
 
-localparam int PROCESSING_ELEMENT_LATENCY = 1;
+localparam int PROCESSING_ELEMENT_LATENCY = 5;
 localparam int MAX_TILES = 16;
 localparam int MAX_TILES_W = $clog2(MAX_TILES);
 
